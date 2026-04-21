@@ -1,0 +1,16 @@
+{
+  "case_id": "CASE-1005",
+  "case_number": "02584387",
+  "status": "Waiting on Client",
+  "origin": "Case Portal - Claim",
+  "sub_category": "Claim | Damaged in Transit",
+  "subject": "ShipBob Claim",
+  "description": "Shipment ID: 349164073. Date of Last Carrier Tracking: March 10, 2026. Carrier: Other. Damaged. Damage Type: Damage due to carrier mishandling. Number of affected orders: 1.",
+  "order_id": "340775987",
+  "user_id": "398045",
+  "shipment_id": "349164073",
+  "delivered_date": "2026-03-10T22:54:36.000+0000",
+  "contact_email": "sakukreja+5@shipbob.com",
+  "account_name": "Loam Science",
+  "created_date": "2026-03-18T17:52:59.000+0000"
+}

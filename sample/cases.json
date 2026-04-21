@@ -1,0 +1,9 @@
+{
+  "cases": [
+    { "case_id": "CASE-1001", "case_number": "01838218", "status": "New", "subject": "ShipBob Claim", "created_date": "2026-02-19T14:20:16.000+0000" },
+    { "case_id": "CASE-1002", "case_number": "01838273", "status": "New", "subject": "ShipBob Claim", "created_date": "2026-02-26T18:20:11.000+0000" },
+    { "case_id": "CASE-1003", "case_number": "01838282", "status": "New", "subject": "ShipBob Claim", "created_date": "2026-02-26T18:20:11.000+0000" },
+    { "case_id": "CASE-1004", "case_number": "02564294", "status": "Closed", "subject": "ShipBob Claim", "created_date": "2026-03-09T18:51:42.000+0000" },
+    { "case_id": "CASE-1005", "case_number": "02584387", "status": "Waiting on Client", "subject": "ShipBob Claim", "created_date": "2026-03-18T17:52:59.000+0000" }
+  ]
+}

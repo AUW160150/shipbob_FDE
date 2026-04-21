@@ -1,0 +1,16 @@
+{
+  "case_id": "CASE-1002",
+  "case_number": "01838273",
+  "status": "New",
+  "origin": "Case Portal - Claim",
+  "sub_category": "Claim | Damaged in Transit",
+  "subject": "ShipBob Claim",
+  "description": "Shipment ID: 344745459. Date of Last Carrier Tracking: February 22, 2026. Carrier: Other. Damaged. Damage Type: Damage due to poor/bad packaging. Defect Type: Both product and shipping box damaged. Number of affected orders: 1.",
+  "order_id": "336431771",
+  "user_id": "283959",
+  "shipment_id": "344745459",
+  "delivered_date": "2026-02-22T17:40:30.000+0000",
+  "contact_email": "mtaparia@shipbob.com",
+  "account_name": "CleanBoss",
+  "created_date": "2026-02-26T18:20:11.000+0000"
+}

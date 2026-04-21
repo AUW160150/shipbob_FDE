@@ -1,0 +1,16 @@
+{
+  "case_id": "CASE-1001",
+  "case_number": "01838218",
+  "status": "New",
+  "origin": "Case Portal - Claim",
+  "sub_category": "Claim | Damaged in Transit",
+  "subject": "ShipBob Claim",
+  "description": "Shipment ID: 342578703. Customer received order and product arrived damaged. Both product and shipping box damaged. Damage due to poor/bad packaging. 1 order affected.",
+  "order_id": "334291211",
+  "user_id": "334430",
+  "shipment_id": "342578703",
+  "delivered_date": "2026-02-11T11:36:14.000+0000",
+  "contact_email": "sakukreja@shipbob.com",
+  "account_name": "Best Paw Nutrition",
+  "created_date": "2026-02-19T14:20:16.000+0000"
+}

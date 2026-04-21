@@ -1,0 +1,9 @@
+{
+  "invoice_id": "INV-342578703",
+  "shipment_id": "342578703",
+  "line_items": [
+    { "product_id": "1374243085", "name": "Additional Collagen Ampoule Duo", "sku": "AMP1", "quantity": 1, "unit_price": 38.00 },
+    { "product_id": "1309112104", "name": "Liposomal Tripeptide Collagen", "sku": "COLLAGEN1", "quantity": 1, "unit_price": 52.00 }
+  ],
+  "generated_at": "2026-03-21T10:00:00.000+0000"
+}

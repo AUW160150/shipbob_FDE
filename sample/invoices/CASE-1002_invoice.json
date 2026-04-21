@@ -1,0 +1,10 @@
+{
+  "invoice_id": "INV-344745459",
+  "shipment_id": "344745459",
+  "line_items": [
+    { "product_id": "897092060", "name": "CleanBoss Botanical Disinfectant & Cleaner 24oz 2 Pack", "sku": "A00360", "quantity": 1, "unit_price": 24.99 },
+    { "product_id": "897518713", "name": "CleanBoss Multi Surface Cleaner 24oz", "sku": "A00300", "quantity": 2, "unit_price": 12.99 },
+    { "product_id": "1377567317", "name": "CleanBoss Foaming Cleaning Wipes 70 pack", "sku": "A00299", "quantity": 1, "unit_price": 14.99 }
+  ],
+  "generated_at": "2026-03-21T10:00:00.000+0000"
+}

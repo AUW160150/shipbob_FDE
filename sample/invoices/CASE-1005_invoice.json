@@ -1,0 +1,9 @@
+{
+  "invoice_id": "INV-349164073",
+  "shipment_id": "349164073",
+  "line_items": [
+    { "product_id": "1130664154", "name": "30-day Pouch LOAM Prebiotic Fiber Formula", "sku": "LOAM-30DAY-001", "quantity": 1, "unit_price": 45.00 },
+    { "product_id": "1374224271", "name": "Insert Card", "sku": "Health Grows Here - Insert", "quantity": 1, "unit_price": 0.00 }
+  ],
+  "generated_at": "2026-03-21T10:00:00.000+0000"
+}

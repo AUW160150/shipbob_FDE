@@ -1,0 +1,16 @@
+{
+  "case_id": "CASE-1004",
+  "case_number": "02564294",
+  "status": "Closed",
+  "origin": "Case Portal - Claim",
+  "sub_category": "Claim | Damaged in Transit",
+  "subject": "ShipBob Claim",
+  "description": "Shipment ID: 330936165. Date of Last Carrier Tracking: March 6, 2026. Carrier: Other. Damaged. Damage Type: Damage due to poor/bad packaging. Defect Type: Product damaged, but shipping box is intact. Number of affected orders: 1.",
+  "order_id": "322882110",
+  "user_id": "374167",
+  "shipment_id": "330936165",
+  "delivered_date": "2025-12-26T12:13:36.000+0000",
+  "contact_email": "sakukreja+6@shipbob.com",
+  "account_name": "Catalyze-X",
+  "created_date": "2026-03-09T18:51:42.000+0000"
+}

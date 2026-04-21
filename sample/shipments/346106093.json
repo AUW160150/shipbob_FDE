@@ -1,0 +1,9 @@
+{
+  "shipment_id": "346106093",
+  "order_id": "337761802",
+  "carrier": "USPS",
+  "tracking_number": "9234690244541403638849",
+  "status": "Delivered",
+  "delivered_date": "2026-02-25T21:51:46.000+0000",
+  "is_insured": false
+}

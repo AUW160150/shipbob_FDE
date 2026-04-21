@@ -1,0 +1,7 @@
+{
+  "attachments": [
+    { "attachment_id": "ATT-CASE-1003-01", "file_name": "Inv.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1003/01_Inv.png?se=2026-05-19T23%3A02%3A56Z&sp=r&sv=2026-02-06&sr=b&sig=Bk64Wf05jp1hFjL3C8OLVMeQN5fLjJTSbGXW2JZebcE%3D" },
+    { "attachment_id": "ATT-CASE-1003-02", "file_name": "Screenshot_Feb_26_20-45-24.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1003/02_Screenshot_at_Feb_26_20-45-24.png?se=2026-05-19T23%3A03%3A00Z&sp=r&sv=2026-02-06&sr=b&sig=riVlLbCnGUkSJaVThYlYcRUCr4weREwuVWXkVGq2geE%3D" },
+    { "attachment_id": "ATT-CASE-1003-03", "file_name": "Screenshot_Feb_26_20-45-11.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1003/03_Screenshot_at_Feb_26_20-45-11.png?se=2026-05-19T23%3A03%3A04Z&sp=r&sv=2026-02-06&sr=b&sig=VtxRPaa4eIO9TFnM0ZgH9uIbD9X1uw1Y91bhyGJrbS0%3D" }
+  ]
+}

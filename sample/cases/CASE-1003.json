@@ -1,0 +1,16 @@
+{
+  "case_id": "CASE-1003",
+  "case_number": "01838282",
+  "status": "New",
+  "origin": "Case Portal - Claim",
+  "sub_category": "Claim | Damaged in Transit",
+  "subject": "ShipBob Claim",
+  "description": "Shipment ID: 346106093. Date of Last Carrier Tracking: February 24, 2026. Carrier: Other. Damaged. Damage Type: Damage due to carrier mishandling. Number of affected orders: 2.",
+  "order_id": "337761802",
+  "user_id": "373103",
+  "shipment_id": "346106093",
+  "delivered_date": "2026-02-25T21:51:46.000+0000",
+  "contact_email": "sakukreja+4@shipbob.com",
+  "account_name": "Huge Supplements",
+  "created_date": "2026-02-26T18:20:11.000+0000"
+}

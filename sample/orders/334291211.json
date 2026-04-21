@@ -1,0 +1,9 @@
+{
+  "order_id": "334291211",
+  "user_id": "334430",
+  "line_items": [
+    { "product_id": "1374243085", "name": "Additional Collagen Ampoule Duo", "sku": "AMP1", "quantity": 1, "unit_price": 38.00 },
+    { "product_id": "1309112104", "name": "Liposomal Tripeptide Collagen", "sku": "COLLAGEN1", "quantity": 1, "unit_price": 52.00 }
+  ],
+  "created_date": "2026-02-07T07:42:48.000+0000"
+}

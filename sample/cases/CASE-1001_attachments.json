@@ -1,0 +1,7 @@
+{
+  "attachments": [
+    { "attachment_id": "ATT-CASE-1001-01", "file_name": "kgray2.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/01_kgray2.png?se=2026-05-19T22%3A32%3A39Z&sp=r&sv=2026-02-06&sr=b&sig=N5dJK5wJ6285cS65ctLI8Z5ZBeprw%2B7pP82CdMmic0E%3D" },
+    { "attachment_id": "ATT-CASE-1001-02", "file_name": "kgray1.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/02_kgray1.png?se=2026-05-19T22%3A32%3A42Z&sp=r&sv=2026-02-06&sr=b&sig=Eg3jA%2BbanqUr1rckV6hP97/OBJqQ/UHp/uKLT8RZne8%3D" },
+    { "attachment_id": "ATT-CASE-1001-03", "file_name": "kgray3.png", "content_type": "image/png", "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/03_kgray3.png?se=2026-05-19T22%3A32%3A46Z&sp=r&sv=2026-02-06&sr=b&sig=i7lTW9c6yKTExgoXDBSgKk0Myf2rnVv%2BvoddsOTJ%2BQE%3D" }
+  ]
+}

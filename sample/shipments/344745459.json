@@ -1,0 +1,9 @@
+{
+  "shipment_id": "344745459",
+  "order_id": "336431771",
+  "carrier": "CirroECommerce",
+  "tracking_number": "CR000441735725",
+  "status": "Delivered",
+  "delivered_date": "2026-02-22T17:40:30.000+0000",
+  "is_insured": false
+}
