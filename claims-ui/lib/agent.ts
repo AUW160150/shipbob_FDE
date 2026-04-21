@@ -1,3 +1,5 @@
+import path from "path"
+import fs from "fs"
 import type { Case, Shipment, Attachment, Invoice, GateResult, RulebookResult } from "./types"
 
 const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
@@ -31,6 +33,7 @@ export interface VisionOutput {
   product_identifiable: number
   packaging_present: number
   claim_coherent: number
+  customer_confirmation_present: number
   damaged_item_name: string
   damaged_item_price: number
 }
@@ -55,6 +58,7 @@ export interface AgentAnalysis {
   vision: VisionOutput | null
   decision: DecisionOutput | null
   judge: JudgeOutput | null
+  feedbackApplied: boolean
   updatedRulebook: Partial<RulebookResult>
 }
 
@@ -78,12 +82,13 @@ function validateVision(raw: unknown): VisionOutput | null {
   const required = ["damage_visible", "product_identifiable", "packaging_present", "claim_coherent", "damaged_item_name", "damaged_item_price"]
   if (required.some((k) => !(k in r))) return null
   return {
-    damage_visible:       clamp(r.damage_visible),
-    product_identifiable: clamp(r.product_identifiable),
-    packaging_present:    clamp(r.packaging_present),
-    claim_coherent:       clamp(r.claim_coherent),
-    damaged_item_name:    String(r.damaged_item_name ?? "Unknown item"),
-    damaged_item_price:   Math.max(0, parseFloat(String(r.damaged_item_price ?? 0)) || 0),
+    damage_visible:                 clamp(r.damage_visible),
+    product_identifiable:           clamp(r.product_identifiable),
+    packaging_present:              clamp(r.packaging_present),
+    claim_coherent:                 clamp(r.claim_coherent),
+    customer_confirmation_present:  clamp(r.customer_confirmation_present ?? 0),
+    damaged_item_name:              String(r.damaged_item_name ?? "Unknown item"),
+    damaged_item_price:             Math.max(0, parseFloat(String(r.damaged_item_price ?? 0)) || 0),
   }
 }
 
@@ -183,6 +188,7 @@ export async function analyzeEvidence(
 - product_identifiable (0.0–1.0): Can the specific damaged product be positively identified?
 - packaging_present (0.0–1.0): Is the outer shipping packaging shown?
 - claim_coherent (0.0–1.0): Does the merchant description match what is visible?
+- customer_confirmation_present (0.0–1.0): Does any image appear to be a screenshot or document showing the end customer reported damage (email, chat, message screenshot)?
 - damaged_item_name (string): The specific item that appears damaged
 - damaged_item_price (number): Its unit price from the invoice (0 if not determinable)
 
@@ -210,19 +216,54 @@ Be conservative — only score high when there is clear, unambiguous evidence. R
   }
 }
 
+// ---------- Feedback loader ----------
+
+interface FeedbackEntry {
+  merchant: string
+  case_id: string
+  override_reason?: string
+  email_was_edited: boolean
+  reimbursement_amount: number
+  product_name: string
+  recommendation: string
+}
+
+function loadMerchantFeedback(merchant: string): FeedbackEntry[] {
+  try {
+    const file = path.join(process.cwd(), "..", "sample", "feedback.json")
+    const all = JSON.parse(fs.readFileSync(file, "utf-8")) as FeedbackEntry[]
+    return all.filter((e) => e.merchant === merchant)
+  } catch {
+    return []
+  }
+}
+
+function buildFeedbackContext(feedback: FeedbackEntry[]): string {
+  if (feedback.length === 0) return ""
+  const lines = feedback.map((f) => {
+    const parts = [`Case ${f.case_id}: ${f.recommendation} ($${f.reimbursement_amount})`]
+    if (f.override_reason) parts.push(`rep override: "${f.override_reason}"`)
+    if (f.email_was_edited) parts.push("rep edited the draft email before sending")
+    return parts.join(", ")
+  })
+  return `\nPast interactions with this merchant:\n${lines.join("\n")}\nUse this context to calibrate your recommendation.\n`
+}
+
 // ---------- Step 3: decision + draft email ----------
 
 export async function makeDecision(
   c: Case,
   vision: VisionOutput,
-  recommendedAmount: number
+  recommendedAmount: number,
+  feedbackContext = ""
 ): Promise<DecisionOutput | null> {
   const context = `Case: ${c.case_id} — ${c.account_name}
 Description: ${c.description}
-Vision scores: damage=${vision.damage_visible.toFixed(2)}, identifiable=${vision.product_identifiable.toFixed(2)}, packaging=${vision.packaging_present.toFixed(2)}, coherent=${vision.claim_coherent.toFixed(2)}
+Vision scores: damage=${vision.damage_visible.toFixed(2)}, identifiable=${vision.product_identifiable.toFixed(2)}, packaging=${vision.packaging_present.toFixed(2)}, coherent=${vision.claim_coherent.toFixed(2)}, customer_confirmation=${vision.customer_confirmation_present.toFixed(2)}
 Damaged item: ${vision.damaged_item_name} @ $${vision.damaged_item_price.toFixed(2)}
 Recommended reimbursement: $${recommendedAmount.toFixed(2)}
-Contact: ${c.contact_email} | Case #${c.case_number}`
+Contact: ${c.contact_email} | Case #${c.case_number}
+${feedbackContext}`
 
   const raw = await orChat(
     "google/gemini-2.5-flash",
@@ -319,18 +360,18 @@ export async function runAgent(
   existingRulebook: RulebookResult
 ): Promise<AgentAnalysis> {
   if (!existingRulebook.eligibility.passed) {
-    return { caseSummary: "", vision: null, decision: null, judge: null, updatedRulebook: {} }
+    return { caseSummary: "", vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
   }
 
   const caseSummary = await generateCaseSummary(c.description)
 
   if (attachments.length === 0) {
-    return { caseSummary, vision: null, decision: null, judge: null, updatedRulebook: {} }
+    return { caseSummary, vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
   }
 
   const vision = await analyzeEvidence(attachments, invoice, c.description)
   if (!vision) {
-    return { caseSummary, vision: null, decision: null, judge: null, updatedRulebook: {} }
+    return { caseSummary, vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
   }
 
   const decisionConfidence = computeDecisionConfidence(vision)
@@ -341,7 +382,11 @@ export async function runAgent(
     100
   )
 
-  const decision = await makeDecision(c, vision, recommendedAmount)
+  const pastFeedback = loadMerchantFeedback(c.account_name)
+  const feedbackContext = buildFeedbackContext(pastFeedback)
+  const feedbackApplied = pastFeedback.length > 0
+
+  const decision = await makeDecision(c, vision, recommendedAmount, feedbackContext)
 
   // Judge runs only when we have a decision
   const judge = decision ? await judgeDecision(vision, decision) : null
@@ -372,6 +417,7 @@ export async function runAgent(
     vision,
     decision,
     judge,
+    feedbackApplied,
     updatedRulebook: {
       evidence: evidenceGate,
       decision: decisionGate,

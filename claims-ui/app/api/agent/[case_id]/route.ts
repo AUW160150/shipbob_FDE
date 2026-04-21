@@ -35,6 +35,7 @@ export async function POST(
       vision: analysis.vision,
       decision: analysis.decision,
       judge: analysis.judge,
+      feedbackApplied: analysis.feedbackApplied,
       rulebook: updatedRulebook,
     })
   } catch (err) {

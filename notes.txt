@@ -1,0 +1,8 @@
+The assignment asks you to proactively tell them where it breaks. Key
+  honest answers:                                                            
+  - Vision model scores are not calibrated — a blurry photo might score high
+  - Judge model (Llama-8B) is too weak to catch subtle contradictions        
+  - No persistence — all state is in-memory, restart loses everything
+  - Signed image URLs expire May 2026                                        
+  - Single agent, no queue — if 100 cases come in simultaneously, they block 
+                                                                             

@@ -115,9 +115,24 @@ export function runRulebook(
     }
   }
 
+  // Heuristic check for end-customer confirmation attachment
+  const confirmationKeywords = ["screenshot", "confirm", "email", "msg", "message", "chat", "customer"]
+  const hasCustomerConfirmation = attachments.some((a) =>
+    confirmationKeywords.some((kw) => a.file_name.toLowerCase().includes(kw))
+  )
+
+  const evidenceNotes = [
+    `${attachments.length} attachment(s) present`,
+    `${billableItems.length} billable invoice item(s)`,
+    hasCustomerConfirmation
+      ? "Customer confirmation attachment detected"
+      : "No customer confirmation attachment found — agent will check photos",
+    // unit_price from generated invoice is already post-discount fulfillment price
+  ]
+
   const evidence: GateResult = {
     passed: true,
-    reason: `${attachments.length} attachment(s) present. ${invoice.line_items.length} invoice line item(s). Agent will verify damaged item from photos.`,
+    reason: evidenceNotes.join(". ") + ".",
     confidence: 1,
   }
 
@@ -129,13 +144,14 @@ export function runRulebook(
 
   const decision: GateResult = {
     passed: true,
-    reason: `"${candidateItem.name}" identified as likely damaged item ($${candidateItem.unit_price.toFixed(2)}). Awaiting AI photo verification.`,
+    reason: `"${candidateItem.name}" identified as likely damaged item. Awaiting AI photo verification.`,
     confidence: decisionConfidence,
   }
 
   const overallConfidence = Math.min(eligibility.confidence, evidence.confidence, decision.confidence)
   const needsHumanReview = overallConfidence < HUMAN_REVIEW_THRESHOLD
 
+  // unit_price from /invoices/generate is post-discount fulfillment price per ShipBob spec
   const amount = clamp(candidateItem.unit_price, 100)
   const label: ClaimLabel = amount >= 75 ? "HIGH_VALUE" : "READY_FOR_REVIEW"
 

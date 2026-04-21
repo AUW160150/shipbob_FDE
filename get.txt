@@ -1,0 +1,63 @@
+GET
+GET /cases
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases
+
+GET
+GET /cases/:case_id
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/:case_id
+
+PATH VARIABLES
+case_id
+CASE-1001
+
+GET
+GET /cases/:case_id/attachments
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/:case_id/attachments
+PATH VARIABLES
+case_id
+CASE-1001
+
+GET
+GET /shipments/:shipment_id
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/shipments/:shipment_id
+PATH VARIABLES
+shipment_id
+342578703
+
+GET
+GET /orders/:order_id
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/orders/:order_id
+PATH VARIABLES
+order_id
+334291211
+
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/orders/334291211'
+
+POST
+POST /invoices/generate
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/invoices/generate
+
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/invoices/generate' \
+--header 'Content-Type: application/json' \
+--data '{
+  "shipment_id": "342578703",
+  "user_id": "334430"
+}'
+HEADERS
+Content-Type
+application/json
+
+POST
+POST /reimbursements
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/reimbursements
+HEADERS
+Content-Type
+application/json
+
+POST
+POST /cases/:case_id/email
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/:case_id/email
+
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/CASE-1001/email' \
+--header 'Content-Type: application/json' \
+--data '{}' 

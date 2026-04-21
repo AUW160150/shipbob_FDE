@@ -1,0 +1,193 @@
+ShipBob FDE Take-Home — Damaged-in-Transit Claims
+POST
+POST /reimbursements
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/reimbursements
+HEADERS
+Content-Type
+application/json
+
+Body
+raw (json)
+json
+{
+  "case_id": "",
+  "order_id": "",
+  "user_id": "",
+  "shipment_id": "",
+  "product_name": "",
+  "amount": 0
+}
+Example Request
+CASE-1001
+View More
+curl
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/reimbursements' \
+--header 'Content-Type: application/json' \
+--data '{
+  "case_id": "CASE-1001",
+  "order_id": "334291211",
+  "user_id": "334430",
+  "shipment_id": "342578703",
+  "product_name": "Additional Collagen Ampoule Duo",
+  "amount": 38.00
+}'
+201 Created
+Example Response
+Body
+Headers (1)
+json
+{
+  "reimbursement_id": "RMB-00101",
+  "status": "approved",
+  "created_at": "2026-03-21T10:00:00.000+0000"
+}
+Email
+POST
+POST /cases/:case_id/email
+https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/:case_id/email
+HEADERS
+Content-Type
+application/json
+
+PATH VARIABLES
+case_id
+CASE-1001
+
+Body
+raw (json)
+json
+{
+    "to":"sakukreja@shipbob.com",
+    "subject": "Hello",
+    "body": "Hello Case1001"
+}
+Example Request
+Success
+View More
+curl
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/CASE-1001/email' \
+--header 'Content-Type: application/json' \
+--data '{}'
+200 OK
+Example Response
+Body
+Headers (1)
+json
+{
+  "success": true,
+  "message": "Email queued",
+  "case_id": "CASE-xxxx"
+}
+
+There should be information about case, attachment, shipments, order, invoices, reimbursements email.
+All the API call instructions are provided here.
+
+
+
+{
+  "cases": [
+    {
+      "case_id": "CASE-1001",
+      "case_number": "01838218",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-19T14:20:16.000+0000"
+    },
+    {
+      "case_id": "CASE-1002",
+      "case_number": "01838273",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-26T18:20:11.000+0000"
+    },
+    {
+      "case_id": "CASE-1003",
+      "case_number": "01838282",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-26T18:20:11.000+0000"
+    },
+    {
+      "case_id": "CASE-1004",
+      "case_number": "02564294",
+      "status": "Closed",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-03-09T18:51:42.000+0000"
+    },
+    {
+      "case_id": "CASE-1005",
+      "case_number": "02584387",
+      "status": "Waiting on Client",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-03-18T17:52:59.000+0000"
+    }
+  ]
+}
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases'
+
+{
+  "cases": [
+    {
+      "case_id": "CASE-1001",
+      "case_number": "01838218",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-19T14:20:16.000+0000"
+    },
+    {
+      "case_id": "CASE-1002",
+      "case_number": "01838273",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-26T18:20:11.000+0000"
+    },
+    {
+      "case_id": "CASE-1003",
+      "case_number": "01838282",
+      "status": "New",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-02-26T18:20:11.000+0000"
+      
+    },
+    {
+      "case_id": "CASE-1004",
+      "case_number": "02564294",
+      "status": "Closed",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-03-09T18:51:42.000+0000"
+    },
+    {
+      "case_id": "CASE-1005",
+      "case_number": "02584387",
+      "status": "Waiting on Client",
+      "subject": "ShipBob Claim",
+      "created_date": "2026-03-18T17:52:59.000+0000"
+    }
+  ]
+}
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/CASE-1001'
+
+curl --location 'https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io/cases/CASE-1001/attachments'
+
+{
+  "attachments": [
+    {
+      "attachment_id": "ATT-CASE-1001-01",
+      "file_name": "kgray2.png",
+      "content_type": "image/png",
+      "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/01_kgray2.png?se=2026-05-19T22%3A32%3A39Z&sp=r&sv=2026-02-06&sr=b&sig=N5dJK5wJ6285cS65ctLI8Z5ZBeprw%2B7pP82CdMmic0E%3D"
+    },
+    {
+      "attachment_id": "ATT-CASE-1001-02",
+      "file_name": "kgray1.png",
+      "content_type": "image/png",
+      "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/02_kgray1.png?se=2026-05-19T22%3A32%3A42Z&sp=r&sv=2026-02-06&sr=b&sig=Eg3jA%2BbanqUr1rckV6hP97/OBJqQ/UHp/uKLT8RZne8%3D"
+    },
+    {
+      "attachment_id": "ATT-CASE-1001-03",
+      "file_name": "kgray3.png",
+      "content_type": "image/png",
+      "url": "https://sa032101pubdevuc.blob.core.windows.net/shipbob-fde-mock/case-1001/03_kgray3.png?se=2026-05-19T22%3A32%3A46Z&sp=r&sv=2026-02-06&sr=b&sig=i7lTW9c6yKTExgoXDBSgKk0Myf2rnVv%2BvoddsOTJ%2BQE%3D"
+    }
+  ]
+}

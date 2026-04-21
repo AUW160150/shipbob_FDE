@@ -69,6 +69,7 @@ interface AgentResult {
     product_identifiable: number
     packaging_present: number
     claim_coherent: number
+    customer_confirmation_present: number
     damaged_item_name: string
     damaged_item_price: number
   } | null
@@ -80,6 +81,7 @@ interface AgentResult {
     draft_email: string
   } | null
   judge: JudgeResult | null
+  feedbackApplied: boolean
   rulebook: RulebookResult
 }
 
@@ -158,6 +160,8 @@ export default function ClaimDetail({
   const [overrideMode, setOverrideMode] = useState(false)
   const [overrideReason, setOverrideReason] = useState("")
   const [overridden, setOverridden] = useState(false)
+  const [approving, setApproving] = useState(false)
+  const [approveResult, setApproveResult] = useState<{ reimbursement_id?: string; error?: string } | null>(null)
   const meta = LABEL_META[rulebook.label]
   const overallPct = Math.round(rulebook.overallConfidence * 100)
   const humanReviewActive = rulebook.needsHumanReview && !overridden
@@ -188,9 +192,53 @@ export default function ClaimDetail({
     setOverrideMode(false)
   }
 
-  function handleApprove() {
-    setSubmitted(true)
-    onAddress?.({ ...claim, rulebook })
+  async function handleApprove() {
+    setApproving(true)
+    const originalDraft = claim.rulebook.draftEmail ?? ""
+    const emailWasEdited = email.trim() !== originalDraft.trim()
+    const productName = agentResult?.vision?.damaged_item_name ?? ""
+    const amount = rulebook.recommendedAmount ?? 0
+
+    try {
+      const res = await fetch(`/api/approve/${c.case_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email_to: c.contact_email,
+          email_subject: `Re: Your Damaged-in-Transit Claim #${c.case_number}`,
+          email_body: email,
+          order_id: claim.order.order_id,
+          user_id: claim.case.user_id,
+          shipment_id: claim.shipment.shipment_id,
+          product_name: productName,
+          amount,
+        }),
+      })
+      const data = await res.json()
+      setApproveResult({ reimbursement_id: data.reimbursement?.reimbursement_id, error: data.error })
+
+      // Save feedback for future agent runs
+      await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          merchant: c.account_name,
+          case_id: c.case_id,
+          override_reason: overridden ? overrideReason : undefined,
+          email_was_edited: emailWasEdited,
+          reimbursement_amount: amount,
+          product_name: productName,
+          recommendation: agentResult?.decision?.recommendation ?? "approve",
+        }),
+      })
+
+      setSubmitted(true)
+      onAddress?.({ ...claim, rulebook })
+    } catch (err) {
+      setApproveResult({ error: err instanceof Error ? err.message : "Unknown error" })
+    } finally {
+      setApproving(false)
+    }
   }
 
   const judgeColors = {
@@ -360,7 +408,12 @@ export default function ClaimDetail({
                 </button>
               )}
               {agentResult && (
-                <span className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">AI analyzed</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md">AI analyzed</span>
+                  {agentResult.feedbackApplied && (
+                    <span className="text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded-md">Prior feedback applied</span>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -386,10 +439,11 @@ export default function ClaimDetail({
               </div>
               {(
                 [
-                  ["Damage Visible",       agentResult.vision.damage_visible,       "35%"],
-                  ["Product Identifiable", agentResult.vision.product_identifiable, "30%"],
-                  ["Packaging Present",    agentResult.vision.packaging_present,    "20%"],
-                  ["Claim Coherent",       agentResult.vision.claim_coherent,       "15%"],
+                  ["Damage Visible",         agentResult.vision.damage_visible,                "35%"],
+                  ["Product Identifiable",  agentResult.vision.product_identifiable,          "30%"],
+                  ["Packaging Present",     agentResult.vision.packaging_present,             "20%"],
+                  ["Claim Coherent",        agentResult.vision.claim_coherent,                "15%"],
+                  ["Customer Confirmation", agentResult.vision.customer_confirmation_present, "—"],
                 ] as [string, number, string][]
               ).map(([label, score, weight]) => (
                 <div key={label} className="flex items-center gap-2">
@@ -504,8 +558,18 @@ export default function ClaimDetail({
               <span className="text-sm text-gray-400">To: {c.contact_email}</span>
             </div>
             {submitted ? (
-              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-base text-green-800 font-medium">
-                ✓ Email sent and reimbursement submitted successfully.
+              <div className="space-y-2">
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-base text-green-800 font-medium">
+                  ✓ Email sent and reimbursement submitted successfully.
+                </div>
+                {approveResult?.reimbursement_id && (
+                  <p className="text-sm text-gray-500">
+                    Reimbursement ID: <span className="font-mono font-semibold text-gray-800">{approveResult.reimbursement_id}</span>
+                  </p>
+                )}
+                {approveResult?.error && (
+                  <p className="text-sm text-red-500">Note: {approveResult.error}</p>
+                )}
               </div>
             ) : (
               <>
@@ -515,13 +579,20 @@ export default function ClaimDetail({
                   rows={12}
                   className="w-full text-sm text-gray-800 border border-gray-200 rounded-xl p-4 font-mono resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed"
                 />
-                <div className="flex gap-3">
+                <div className="flex gap-3 items-center">
                   <button
                     onClick={handleApprove}
-                    disabled={humanReviewActive}
-                    className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    disabled={humanReviewActive || approving}
+                    className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Approve &amp; Send
+                    {approving ? (
+                      <>
+                        <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Submitting…
+                      </>
+                    ) : (
+                      "Approve & Send"
+                    )}
                   </button>
                   <button
                     onClick={() => setEmail(rulebook.draftEmail ?? "")}
