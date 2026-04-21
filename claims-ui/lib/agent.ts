@@ -216,6 +216,34 @@ Be conservative — only score high when there is clear, unambiguous evidence. R
   }
 }
 
+// ---------- Invoice cross-reference ----------
+
+import type { LineItem } from "./types"
+
+function matchInvoiceItem(aiName: string, lineItems: LineItem[]): LineItem | null {
+  if (!aiName || aiName === "Unknown item") return null
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "")
+  const needle = normalize(aiName)
+
+  // 1. Exact match
+  const exact = lineItems.find((i) => normalize(i.name) === needle)
+  if (exact) return exact
+
+  // 2. One name fully contains the other
+  const contains = lineItems.find(
+    (i) => normalize(i.name).includes(needle) || needle.includes(normalize(i.name))
+  )
+  if (contains) return contains
+
+  // 3. Word overlap — at least 2 words in common
+  const needleWords = new Set(needle.split(" ").filter((w) => w.length > 2))
+  const overlap = lineItems.find((i) => {
+    const itemWords = normalize(i.name).split(" ").filter((w) => w.length > 2)
+    return itemWords.filter((w) => needleWords.has(w)).length >= 2
+  })
+  return overlap ?? null
+}
+
 // ---------- Feedback loader ----------
 
 interface FeedbackEntry {
@@ -376,11 +404,21 @@ export async function runAgent(
 
   const decisionConfidence = computeDecisionConfidence(vision)
   const billableItems = invoice.line_items.filter((i) => i.unit_price > 0)
-  const candidateItem = billableItems.sort((a, b) => b.unit_price - a.unit_price)[0]
-  const recommendedAmount = Math.min(
-    vision.damaged_item_price > 0 ? vision.damaged_item_price : (candidateItem?.unit_price ?? 0),
-    100
-  )
+  const highestValueItem = billableItems.sort((a, b) => b.unit_price - a.unit_price)[0]
+
+  // Cross-reference: verify AI-identified item exists on invoice
+  const matchedItem = matchInvoiceItem(vision.damaged_item_name, billableItems)
+  const invoiceItemVerified = matchedItem !== null
+
+  // Use matched invoice price as source of truth; fall back to highest-value item if unmatched
+  const verifiedItem = matchedItem ?? highestValueItem
+  const recommendedAmount = Math.min(verifiedItem?.unit_price ?? 0, 100)
+
+  // Override vision name/price to reflect what's actually on the invoice
+  if (matchedItem) {
+    vision.damaged_item_name = matchedItem.name
+    vision.damaged_item_price = matchedItem.unit_price
+  }
 
   const pastFeedback = loadMerchantFeedback(c.account_name)
   const feedbackContext = buildFeedbackContext(pastFeedback)
@@ -391,19 +429,27 @@ export async function runAgent(
   // Judge runs only when we have a decision
   const judge = decision ? await judgeDecision(vision, decision) : null
 
-  // If judge fails, force human review regardless of confidence
+  // Force human review if judge fails or item couldn't be verified on invoice
   const judgeFailed = judge?.verdict === "fail"
+  const itemUnverified = !invoiceItemVerified
 
   const finalAmount = decision?.recommended_amount ?? recommendedAmount
   const finalConfidence = Math.min(existingRulebook.eligibility.confidence, decisionConfidence)
-  const needsHumanReview = finalConfidence < HUMAN_REVIEW_THRESHOLD || judgeFailed
+  const needsHumanReview = finalConfidence < HUMAN_REVIEW_THRESHOLD || judgeFailed || itemUnverified
+
+  const invoiceNote = invoiceItemVerified
+    ? `Matched to invoice: "${matchedItem!.name}" (SKU: ${matchedItem!.sku}) @ $${matchedItem!.unit_price.toFixed(2)}.`
+    : `AI identified "${vision.damaged_item_name}" but no match found on invoice — falling back to highest-value item "${highestValueItem?.name}". Human review required.`
 
   const decisionGate: GateResult = {
-    passed: decision?.recommendation === "approve" && !judgeFailed,
-    reason: judgeFailed
-      ? `Judge flagged inconsistency: ${judge?.flags.join("; ")}. Original: ${decision?.reasoning}`
-      : (decision?.reasoning ?? `damage=${vision.damage_visible.toFixed(2)}, identifiable=${vision.product_identifiable.toFixed(2)}`),
-    confidence: decisionConfidence,
+    passed: decision?.recommendation === "approve" && !judgeFailed && invoiceItemVerified,
+    reason: [
+      invoiceNote,
+      judgeFailed
+        ? `Judge flagged: ${judge?.flags.join("; ")}.`
+        : (decision?.reasoning ?? ""),
+    ].filter(Boolean).join(" "),
+    confidence: invoiceItemVerified ? decisionConfidence : Math.min(decisionConfidence, 0.5),
   }
 
   const evidenceGate: GateResult = {
