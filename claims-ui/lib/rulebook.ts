@@ -1,6 +1,6 @@
 import type { Case, Shipment, Attachment, Invoice, ClaimLabel, PriorityDot, RulebookResult, GateResult } from "./types"
 
-const ELIGIBILITY_WINDOW_DAYS = 90
+const ELIGIBILITY_WINDOW_DAYS = 30
 const HUMAN_REVIEW_THRESHOLD = 0.70
 
 function daysBetween(a: string, b: string): number {

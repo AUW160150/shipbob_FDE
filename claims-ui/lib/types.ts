@@ -65,6 +65,26 @@ export type ClaimLabel =
 
 export type PriorityDot = "red" | "orange" | "yellow" | "green"
 
+// Triage priority tags — assigned before rulebook processing
+export type PriorityTag = "URGENT" | "AGING" | "HIGH_VALUE" | "STANDARD" | "LOW_VALUE"
+
+export interface TriageResult {
+  // Routing
+  isDead: boolean          // filed > 30 days after delivery → Supabase dead_claims
+  isInsured: boolean       // insured shipment → separate queue
+  isIncomplete: boolean    // missing required fields → auto-email + Supabase
+
+  // Classification
+  claimType: string        // e.g. "product_damage", "missing_item", "wrong_item"
+  claimedItems: string[]   // items mentioned in description
+  missingFields: string[]  // which fields triggered isIncomplete
+
+  // Queue
+  priorityTag: PriorityTag
+  priorityReason: string
+  daysInQueue: number      // days since case created_date
+}
+
 export interface GateResult {
   passed: boolean
   reason: string
@@ -90,4 +110,5 @@ export interface ClaimSummary {
   invoice: Invoice
   attachments: Attachment[]
   rulebook: RulebookResult
+  triage: TriageResult
 }

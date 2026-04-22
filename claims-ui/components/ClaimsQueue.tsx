@@ -11,6 +11,22 @@ const DOT: Record<PriorityDot, string> = {
   green:  "bg-green-500",
 }
 
+const TRIAGE_DOT: Record<string, string> = {
+  URGENT:     "bg-red-500",
+  AGING:      "bg-red-500",
+  HIGH_VALUE: "bg-red-500",
+  STANDARD:   "bg-orange-400",
+  LOW_VALUE:  "bg-yellow-400",
+}
+
+const TRIAGE_TAG_COLOR: Record<string, string> = {
+  URGENT:     "text-red-600 bg-red-50",
+  AGING:      "text-red-600 bg-red-50",
+  HIGH_VALUE: "text-red-600 bg-red-50",
+  STANDARD:   "text-gray-500 bg-gray-100",
+  LOW_VALUE:  "text-gray-400 bg-gray-100",
+}
+
 const LABEL_TEXT: Record<ClaimLabel, string> = {
   HIGH_VALUE:       "High Value",
   READY_FOR_REVIEW: "Ready for Review",
@@ -38,7 +54,7 @@ export default function ClaimsQueue({
   claims: ClaimSummary[]
   onAddress: (c: ClaimSummary) => void
 }) {
-  const list = sorted(claims)
+  const list = claims // already sorted by triage priority in AppShell
   const [selected, setSelected] = useState<ClaimSummary>(list[0])
 
   const humanReview = list.filter((c) => c.rulebook.needsHumanReview)
@@ -46,7 +62,8 @@ export default function ClaimsQueue({
 
   function renderItem(claim: ClaimSummary) {
     const isSelected = selected?.case.case_id === claim.case.case_id
-    const dot = DOT[claim.rulebook.priority]
+    const dot = TRIAGE_DOT[claim.triage.priorityTag] ?? DOT[claim.rulebook.priority]
+    const tagColor = TRIAGE_TAG_COLOR[claim.triage.priorityTag] ?? "text-gray-400 bg-gray-100"
     return (
       <li key={claim.case.case_id}>
         <button
@@ -69,15 +86,19 @@ export default function ClaimsQueue({
             </div>
             <div className="flex items-center justify-between mt-0.5">
               <span className="text-xs text-gray-400">{claim.case.case_id}</span>
-              <span className="text-xs text-gray-400">
-                {LABEL_TEXT[claim.rulebook.label]}
+              <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${tagColor}`}>
+                {claim.triage.priorityTag}
               </span>
             </div>
-            <span className="text-xs text-gray-400">
-              {new Date(claim.case.created_date).toLocaleDateString("en-US", {
-                month: "short", day: "numeric",
-              })}
-            </span>
+            <div className="flex items-center justify-between mt-0.5">
+              <span className="text-xs text-gray-400">
+                {new Date(claim.case.created_date).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+              <span className="text-xs text-gray-400">{claim.triage.daysInQueue}d in queue</span>
+            </div>
+            {(claim.triage.priorityTag === "URGENT" || claim.triage.priorityTag === "AGING") && (
+              <p className="text-xs text-red-500 mt-0.5 truncate">{claim.triage.priorityReason}</p>
+            )}
           </div>
         </button>
       </li>
