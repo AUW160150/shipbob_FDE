@@ -5,6 +5,7 @@ import type {
   GateResult, RulebookResult, TriageResult,
   ItemVisionResult, MultiItemVisionOutput,
   AccountOutput, ValidationOutput,
+  PipelineStep, PipelineTrace,
 } from "./types"
 import { logWaitingClaim } from "./supabase"
 import { runAccountAgent } from "./accountAgent"
@@ -44,6 +45,7 @@ export interface AgentAnalysis {
   multiItemVision: MultiItemVisionOutput | null
   accountOutput: AccountOutput | null
   validationOutput: ValidationOutput | null
+  pipelineTrace: PipelineTrace
   decision: DecisionOutput | null
   judge: JudgeOutput | null
   feedbackApplied: boolean
@@ -512,33 +514,64 @@ export async function runAgent(
   existingRulebook: RulebookResult,
   triage?: TriageResult
 ): Promise<AgentAnalysis> {
+  const pipelineSteps: PipelineStep[] = []
+  const pipelineStart = Date.now()
+
+  function step(
+    name: string,
+    status: PipelineStep["status"],
+    summary: string,
+    details: string[],
+    startMs: number
+  ): PipelineStep {
+    const s: PipelineStep = { name, status, summary, details, durationMs: Date.now() - startMs }
+    pipelineSteps.push(s)
+    return s
+  }
+
+  const emptyTrace: PipelineTrace = { steps: [], totalDurationMs: 0 }
   const empty: AgentAnalysis = {
     caseSummary: "", vision: null, multiItemVision: null,
     accountOutput: null, validationOutput: null,
+    pipelineTrace: emptyTrace,
     decision: null, judge: null, feedbackApplied: false, updatedRulebook: {},
   }
 
-  if (!existingRulebook.eligibility.passed) return empty
+  if (!existingRulebook.eligibility.passed) {
+    step("Eligibility", "fail", "Claim failed eligibility gate — pipeline halted.", [existingRulebook.eligibility.reason], pipelineStart)
+    return { ...empty, pipelineTrace: { steps: pipelineSteps, totalDurationMs: Date.now() - pipelineStart } }
+  }
 
+  // Step 1: Case summary
+  let t = Date.now()
   const caseSummary = await generateCaseSummary(c.description)
+  step("Case Summary", "pass", "Plain-English summary generated.", [], t)
 
-  if (attachments.length === 0) return { ...empty, caseSummary }
+  if (attachments.length === 0) {
+    step("Vision", "skip", "No attachments — vision skipped.", [], Date.now())
+    return { ...empty, caseSummary, pipelineTrace: { steps: pipelineSteps, totalDurationMs: Date.now() - pipelineStart } }
+  }
 
-  // Determine claimed items: prefer triage metadata, fallback to description parse
+  // Step 2: Multi-item vision
   const claimedItems = (triage?.claimedItems && triage.claimedItems.length > 0)
     ? triage.claimedItems
     : ["damaged item"]
 
-  // Run multi-item vision concurrently across shared photos
+  t = Date.now()
   const multiItemVision = await runMultiItemAnalysis(claimedItems, attachments, invoice, c.description, c)
+  const verifiedCount = multiItemVision.items.filter((i) => i.verified).length
+  step(
+    "Vision Agent",
+    multiItemVision.packagingHardGatePassed ? (verifiedCount > 0 ? "pass" : "warn") : "warn",
+    `${verifiedCount}/${claimedItems.length} item(s) verified · packaging ${multiItemVision.packagingHardGatePassed ? "✓" : "✗"}`,
+    multiItemVision.items.map((i) => `${i.claimedItemName}: ${i.verified ? "verified" : "unverified"} (damage=${Math.round(i.damage_visible*100)}%, id=${Math.round(i.product_identifiable*100)}%)`),
+    t
+  )
 
-  // Build a representative single VisionOutput from the best-scoring verified item
-  // (or the item with highest damage score if none verified)
   const bestItem = multiItemVision.items.reduce((best, cur) =>
     cur.damage_visible > best.damage_visible ? cur : best,
     multiItemVision.items[0]
   )
-
   const vision: VisionOutput = {
     damage_visible:                bestItem.damage_visible,
     product_identifiable:          bestItem.product_identifiable,
@@ -549,21 +582,59 @@ export async function runAgent(
     damaged_item_price:            bestItem.invoiceMatch?.unit_price ?? 0,
   }
 
-  // Account agent: calculate per-item amounts and generate itemized email
+  // Step 3: Account agent
+  t = Date.now()
   const accountOutput = await runAccountAgent(multiItemVision.items, c)
   const recommendedAmount = accountOutput.totalAmount > 0
     ? accountOutput.totalAmount
     : multiItemVision.totalVerifiedAmount
+  step(
+    "Account Agent",
+    accountOutput.lineItems.length > 0 ? "pass" : "warn",
+    accountOutput.lineItems.length > 0
+      ? `$${accountOutput.totalAmount.toFixed(2)} approved${accountOutput.prorated ? " (prorated)" : ""} · ${accountOutput.lineItems.length} item(s)`
+      : "No verified items — $0 approved",
+    accountOutput.lineItems.map((l) => `${l.itemName}: $${l.approvedAmount.toFixed(2)}`),
+    t
+  )
 
   const pastFeedback = loadMerchantFeedback(c.account_name)
   const feedbackContext = buildFeedbackContext(pastFeedback)
   const feedbackApplied = pastFeedback.length > 0
 
+  // Step 4: Decision agent
+  t = Date.now()
   const decision = await makeDecision(c, vision, recommendedAmount, feedbackContext)
-  const judge = decision ? await judgeDecision(vision, decision) : null
+  step(
+    "Decision Agent",
+    decision?.recommendation === "approve" ? "pass" : decision?.recommendation === "deny" ? "fail" : "warn",
+    decision ? `${decision.recommendation.replace(/_/g, " ").toUpperCase()} · ${Math.round(decision.confidence * 100)}% confidence` : "Decision unavailable",
+    decision ? [decision.reasoning] : [],
+    t
+  )
 
-  // Validation agent: verify account math + email consistency
+  // Step 5: LLM Judge
+  t = Date.now()
+  const judge = decision ? await judgeDecision(vision, decision) : null
+  step(
+    "LLM Judge",
+    judge ? (judge.verdict === "pass" ? "pass" : judge.verdict === "warn" ? "warn" : "fail") : "skip",
+    judge ? `${judge.verdict.toUpperCase()} · ${judge.flags.length} flag(s) · ${Math.round(judge.judge_confidence * 100)}% judge confidence` : "No decision to judge",
+    judge?.flags ?? [],
+    t
+  )
+
+  // Step 6: Validation agent
+  t = Date.now()
   const validationOutput = await runValidationAgent(accountOutput, multiItemVision, decision)
+  const passedChecks = validationOutput.checks.filter((c) => c.passed).length
+  step(
+    "Validation Agent",
+    validationOutput.verdict === "pass" ? "pass" : validationOutput.verdict === "warn" ? "warn" : "fail",
+    `${passedChecks}/${validationOutput.checks.length} checks passed · ${validationOutput.verdict.toUpperCase()}`,
+    validationOutput.checks.map((ch) => `${ch.passed ? "✓" : "✗"} ${ch.name}`),
+    t
+  )
 
   const decisionConfidence = computeDecisionConfidence(vision)
   const judgeFailed = judge?.verdict === "fail"
@@ -605,12 +676,15 @@ export async function runAgent(
   // Prefer account agent email over decision agent email (more itemized)
   const finalDraftEmail = accountOutput.draftEmail || decision?.draft_email || existingRulebook.draftEmail
 
+  const pipelineTrace: PipelineTrace = { steps: pipelineSteps, totalDurationMs: Date.now() - pipelineStart }
+
   return {
     caseSummary,
     vision,
     multiItemVision,
     accountOutput,
     validationOutput,
+    pipelineTrace,
     decision,
     judge,
     feedbackApplied,

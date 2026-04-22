@@ -145,12 +145,13 @@ export async function runTriage(
   // Gate: dead on arrival (filed > 30 days after delivery)
   if (daysFromDelivery > DEAD_DAYS) {
     await logDeadClaim({
-      case_id:       c.case_id,
-      merchant:      c.account_name,
-      delivery_date: shipment.delivered_date,
-      claim_date:    c.created_date,
-      days_late:     daysFromDelivery - DEAD_DAYS,
-      reason:        `Filed ${daysFromDelivery} days after delivery. Limit is ${DEAD_DAYS} days.`,
+      case_id:        c.case_id,
+      case_number:    c.case_number,
+      account_name:   c.account_name,
+      delivered_date: shipment.delivered_date,
+      filed_date:     c.created_date,
+      days_late:      daysFromDelivery - DEAD_DAYS,
+      reason:         `Filed ${daysFromDelivery} days after delivery. Limit is ${DEAD_DAYS} days.`,
     })
     return {
       isDead: true, isInsured: false, isIncomplete: false,
@@ -163,9 +164,12 @@ export async function runTriage(
   // Gate: insured shipment
   if (shipment.is_insured) {
     await logInsuredClaim({
-      case_id:     c.case_id,
-      merchant:    c.account_name,
-      shipment_id: shipment.shipment_id,
+      case_id:         c.case_id,
+      case_number:     c.case_number,
+      account_name:    c.account_name,
+      carrier:         shipment.carrier,
+      tracking_number: shipment.tracking_number,
+      shipment_id:     shipment.shipment_id,
     })
     return {
       isDead: false, isInsured: true, isIncomplete: false,
@@ -183,19 +187,18 @@ export async function runTriage(
   if (missingFields.length > 0) {
     const emailBody = await sendIncompleteEmail(c, missingFields)
     await logIncompleteClaim({
-      case_id:       c.case_id,
-      merchant:      c.account_name,
+      case_id:        c.case_id,
+      case_number:    c.case_number,
+      account_name:   c.account_name,
       missing_fields: missingFields,
-      email_sent:    true,
-      email_body:    emailBody,
+      email_sent_at:  new Date().toISOString(),
     })
     await logAutoEmail({
-      case_id:  c.case_id,
-      merchant: c.account_name,
-      to_email: c.contact_email,
-      subject:  `Action Required: Missing Information for Case #${c.case_number}`,
-      body:     emailBody,
-      reason:   "incomplete",
+      case_id:    c.case_id,
+      case_number: c.case_number,
+      email_type: "incomplete_claim",
+      recipient:  c.contact_email,
+      status:     "sent",
     })
     return {
       isDead: false, isInsured: false, isIncomplete: true,

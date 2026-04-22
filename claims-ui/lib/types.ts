@@ -122,6 +122,19 @@ export interface MultiItemVisionOutput {
   overallCustomerConfirmation: number   // max across items
 }
 
+export interface PipelineStep {
+  name: string
+  status: "pass" | "warn" | "skip" | "fail"
+  summary: string
+  details: string[]
+  durationMs: number
+}
+
+export interface PipelineTrace {
+  steps: PipelineStep[]
+  totalDurationMs: number
+}
+
 export interface AccountLineItem {
   itemName: string
   sku: string
