@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import type { ClaimSummary } from "@/lib/types"
-import { sortByPriority } from "@/lib/triage"
+import { sortByPriority } from "@/lib/sort"
 import ClaimsQueue from "./ClaimsQueue"
 import Dashboard from "./Dashboard"
 import ReviewedPanel from "./ReviewedPanel"

@@ -222,10 +222,3 @@ export async function runTriage(
 
 // ---------- Sort queue by priority ----------
 
-const PRIORITY_ORDER: PriorityTag[] = ["URGENT", "AGING", "HIGH_VALUE", "STANDARD", "LOW_VALUE"]
-
-export function sortByPriority<T extends { triage: TriageResult }>(claims: T[]): T[] {
-  return [...claims].sort(
-    (a, b) => PRIORITY_ORDER.indexOf(a.triage.priorityTag) - PRIORITY_ORDER.indexOf(b.triage.priorityTag)
-  )
-}
