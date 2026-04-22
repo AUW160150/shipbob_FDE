@@ -1,3 +1,4 @@
+import "server-only"
 import { traceable } from "langsmith/traceable"
 
 const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
