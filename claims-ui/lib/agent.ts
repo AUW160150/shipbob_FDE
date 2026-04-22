@@ -471,18 +471,27 @@ Reasoning: ${decision.reasoning}`
     [
       {
         role: "system",
-        content: `You are an independent quality-control judge evaluating a claims AI decision. Given vision scores and the decision made, check for logical consistency.
+        content: `You are an independent quality-control judge evaluating a claims AI decision. Check ONLY for genuine contradictions — cases where the recommendation conflicts with the evidence.
 
 Return a JSON object with exactly these keys:
 - consistent (boolean): Is the recommendation logically consistent with the vision scores?
-- flags (array of strings): List any specific inconsistencies or concerns (empty array if none)
+- flags (array of strings): Only list CONTRADICTIONS (empty array if none)
 - judge_confidence (0.0–1.0): How confident are you in your assessment?
 - verdict: "pass" | "warn" | "fail"
-  - "pass": recommendation is well-supported
-  - "warn": minor inconsistencies, human should double-check
-  - "fail": recommendation contradicts the evidence
 
-Examples of flags: "damage_visible=0.2 but recommendation is approve", "confidence claimed 0.9 but packaging_present=0.1"
+Rules:
+- HIGH damage scores + "approve" recommendation = CONSISTENT. Do NOT flag this.
+- LOW damage scores (< 0.3) + "approve" recommendation = flag it.
+- HIGH damage scores + "deny" recommendation = flag it.
+- Inflated claimed confidence (e.g. 0.95) when damage is ambiguous (0.3–0.6) = flag it.
+- packaging_present < 0.4 + "approve" without noting packaging issue = flag it.
+
+Flag examples (contradictions only):
+  "damage_visible=0.15 but recommendation is approve"
+  "damage_visible=0.9 but recommendation is deny"
+  "confidence claimed 0.95 but damage_visible=0.35 is ambiguous"
+
+NOT a flag: "damage_visible=1.0 and recommendation is approve" — this is expected and correct.
 Return only valid JSON.`,
       },
       { role: "user", content: context },
@@ -553,26 +562,25 @@ export async function runAgent(
   }
 
   // Step 2: Multi-item vision
+  // Prefer triage-extracted names; fall back to invoice item names so matchInvoiceItem works
+  const billableInvoiceItems = invoice.line_items.filter((i) => i.unit_price > 0)
   const claimedItems = (triage?.claimedItems && triage.claimedItems.length > 0)
     ? triage.claimedItems
-    : ["damaged item"]
+    : billableInvoiceItems.length > 0
+      ? billableInvoiceItems.map((i) => i.name)
+      : ["damaged item"]
 
   t = Date.now()
   const multiItemVision = await runMultiItemAnalysis(claimedItems, attachments, invoice, c.description, c)
   const verifiedCount = multiItemVision.items.filter((i) => i.verified).length
-  step(
-    "Vision Agent",
-    multiItemVision.packagingHardGatePassed ? (verifiedCount > 0 ? "pass" : "warn") : "warn",
-    `${verifiedCount}/${claimedItems.length} item(s) verified · packaging ${multiItemVision.packagingHardGatePassed ? "✓" : "✗"}`,
-    multiItemVision.items.map((i) => `${i.claimedItemName}: ${i.verified ? "verified" : "unverified"} (damage=${Math.round(i.damage_visible*100)}%, id=${Math.round(i.product_identifiable*100)}%)`),
-    t
-  )
 
   const bestItem = multiItemVision.items.reduce((best, cur) =>
     cur.damage_visible > best.damage_visible ? cur : best,
     multiItemVision.items[0]
   )
-  const vision: VisionOutput = {
+
+  // Compute vision confidence now so we can use it in the trace step
+  const visionForScore: VisionOutput = {
     damage_visible:                bestItem.damage_visible,
     product_identifiable:          bestItem.product_identifiable,
     packaging_present:             bestItem.packaging_present,
@@ -581,6 +589,21 @@ export async function runAgent(
     damaged_item_name:             bestItem.invoiceMatch?.name ?? bestItem.claimedItemName,
     damaged_item_price:            bestItem.invoiceMatch?.unit_price ?? 0,
   }
+  const visionConfidence = computeDecisionConfidence(visionForScore)
+
+  step(
+    "Vision Agent",
+    multiItemVision.packagingHardGatePassed ? (verifiedCount > 0 ? "pass" : "warn") : "warn",
+    `${verifiedCount}/${claimedItems.length} item(s) verified · packaging ${multiItemVision.packagingHardGatePassed ? "✓" : "✗"} · confidence ${Math.round(visionConfidence * 100)}%`,
+    [
+      ...multiItemVision.items.map((i) => `${i.verified ? "✓" : "✗"} ${i.claimedItemName}: damage=${Math.round(i.damage_visible*100)}%, identifiable=${Math.round(i.product_identifiable*100)}%, packaging=${Math.round(i.packaging_present*100)}%`),
+      `Weighted confidence: ${Math.round(visionConfidence*100)}% (damage×35% + id×30% + pkg×20% + coherence×15%)`,
+      `Customer confirmation: ${Math.round(multiItemVision.overallCustomerConfirmation*100)}%`,
+    ],
+    t
+  )
+
+  const vision: VisionOutput = visionForScore
 
   // Step 3: Account agent
   t = Date.now()
@@ -605,11 +628,20 @@ export async function runAgent(
   // Step 4: Decision agent
   t = Date.now()
   const decision = await makeDecision(c, vision, recommendedAmount, feedbackContext)
+  const gateDetails = [
+    `${vision.damage_visible >= 0.6 ? "✓" : "✗"} damage_visible ${Math.round(vision.damage_visible*100)}% (threshold: 60%)`,
+    `${vision.product_identifiable >= 0.5 ? "✓" : "✗"} product_identifiable ${Math.round(vision.product_identifiable*100)}% (threshold: 50%)`,
+    `${vision.packaging_present >= PACKAGING_HARD_GATE ? "✓" : "✗"} packaging_present ${Math.round(vision.packaging_present*100)}% (threshold: 40%)`,
+    `${vision.claim_coherent >= 0.3 ? "✓" : "✗"} claim_coherent ${Math.round(vision.claim_coherent*100)}% (threshold: 30%)`,
+    decision ? `Recommendation: ${decision.recommendation.replace(/_/g, " ")} · ${Math.round(decision.confidence*100)}% confidence` : "",
+    decision ? decision.reasoning : "",
+  ].filter(Boolean)
+
   step(
     "Decision Agent",
     decision?.recommendation === "approve" ? "pass" : decision?.recommendation === "deny" ? "fail" : "warn",
     decision ? `${decision.recommendation.replace(/_/g, " ").toUpperCase()} · ${Math.round(decision.confidence * 100)}% confidence` : "Decision unavailable",
-    decision ? [decision.reasoning] : [],
+    gateDetails,
     t
   )
 
