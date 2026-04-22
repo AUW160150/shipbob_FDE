@@ -103,6 +103,25 @@ export interface RulebookResult {
   draftEmail: string | null
 }
 
+export interface ItemVisionResult {
+  claimedItemName: string
+  invoiceMatch: { name: string; sku: string; unit_price: number } | null
+  verified: boolean
+  damage_visible: number
+  product_identifiable: number
+  packaging_present: number
+  claim_coherent: number
+  customer_confirmation_present: number
+  verifiedAmount: number  // invoice price if verified, else 0
+}
+
+export interface MultiItemVisionOutput {
+  items: ItemVisionResult[]
+  packagingHardGatePassed: boolean     // max packaging_present >= 0.4
+  totalVerifiedAmount: number           // sum of verifiedAmount, capped at 100
+  overallCustomerConfirmation: number   // max across items
+}
+
 export interface ClaimSummary {
   case: Case
   shipment: Shipment

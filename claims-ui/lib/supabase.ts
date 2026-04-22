@@ -72,10 +72,9 @@ export async function logAutoEmail(data: {
 
 export async function logWaitingClaim(data: {
   case_id: string
-  merchant: string
+  case_number?: string
+  account_name?: string
   missing_evidence: string[]
-  email_sent_at: string
-  status: string
 }) {
   if (!supabase) { warn("logWaitingClaim"); return }
   const { error } = await supabase.from("waiting_claims").insert(data)

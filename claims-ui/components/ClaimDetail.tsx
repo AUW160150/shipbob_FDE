@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import type { ClaimSummary, ClaimLabel, GateResult, RulebookResult } from "@/lib/types"
+import type { ClaimSummary, ClaimLabel, GateResult, RulebookResult, ItemVisionResult, MultiItemVisionOutput } from "@/lib/types"
 
 const LABEL_META: Record<ClaimLabel, { text: string; color: string }> = {
   READY_FOR_REVIEW: { text: "Ready for Review", color: "bg-blue-100 text-blue-800" },
@@ -73,6 +73,7 @@ interface AgentResult {
     damaged_item_name: string
     damaged_item_price: number
   } | null
+  multiItemVision: MultiItemVisionOutput | null
   decision: {
     recommendation: "approve" | "deny" | "request_more_info"
     confidence: number
@@ -83,6 +84,60 @@ interface AgentResult {
   judge: JudgeResult | null
   feedbackApplied: boolean
   rulebook: RulebookResult
+}
+
+function ItemVerificationRow({ item }: { item: ItemVisionResult }) {
+  const statusColor = item.verified
+    ? "bg-green-50 border-green-200"
+    : "bg-red-50 border-red-200"
+  const statusBadge = item.verified
+    ? "bg-green-100 text-green-700"
+    : "bg-red-100 text-red-600"
+
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${statusColor}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusBadge}`}>
+            {item.verified ? "Verified" : "Unverified"}
+          </span>
+          <span className="text-sm font-medium text-gray-800">{item.claimedItemName}</span>
+        </div>
+        <div className="text-right">
+          {item.invoiceMatch ? (
+            <span className="text-xs text-gray-500">
+              Invoice: <span className="font-semibold text-gray-700">${item.invoiceMatch.unit_price.toFixed(2)}</span>
+              {" "}· {item.invoiceMatch.sku}
+            </span>
+          ) : (
+            <span className="text-xs text-red-500">Not on invoice</span>
+          )}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+        {([
+          ["Damage Visible",        item.damage_visible],
+          ["Product Identifiable",  item.product_identifiable],
+          ["Packaging Present",     item.packaging_present],
+          ["Claim Coherent",        item.claim_coherent],
+        ] as [string, number][]).map(([label, score]) => (
+          <div key={label} className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-32 flex-shrink-0">{label}</span>
+            <div className="flex-1 h-1 bg-white/60 rounded-full overflow-hidden border border-black/10">
+              <div
+                className={`h-full rounded-full ${score >= 0.7 ? "bg-green-500" : score >= 0.5 ? "bg-yellow-400" : "bg-red-400"}`}
+                style={{ width: `${Math.round(score * 100)}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold text-gray-600 w-7 text-right">{Math.round(score * 100)}%</span>
+          </div>
+        ))}
+      </div>
+      {item.verified && item.verifiedAmount > 0 && (
+        <p className="text-xs text-green-700 font-medium">+${item.verifiedAmount.toFixed(2)} added to reimbursement</p>
+      )}
+    </div>
+  )
 }
 
 function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
@@ -431,36 +486,34 @@ export default function ClaimDetail({
             </div>
           )}
 
-          {agentResult?.vision && (
-            <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-100 space-y-2">
+          {agentResult?.multiItemVision && (
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Vision Analysis</p>
-                <p className="text-xs text-indigo-400">gemini-2.5-flash</p>
-              </div>
-              {(
-                [
-                  ["Damage Visible",         agentResult.vision.damage_visible,                "35%"],
-                  ["Product Identifiable",  agentResult.vision.product_identifiable,          "30%"],
-                  ["Packaging Present",     agentResult.vision.packaging_present,             "20%"],
-                  ["Claim Coherent",        agentResult.vision.claim_coherent,                "15%"],
-                  ["Customer Confirmation", agentResult.vision.customer_confirmation_present, "—"],
-                ] as [string, number, string][]
-              ).map(([label, score, weight]) => (
-                <div key={label} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-500 w-40 flex-shrink-0">{label} <span className="text-gray-400">({weight})</span></span>
-                  <div className="flex-1 h-1.5 bg-white rounded-full overflow-hidden border border-indigo-100">
-                    <div
-                      className={`h-full rounded-full ${score >= 0.8 ? "bg-green-500" : score >= 0.5 ? "bg-yellow-400" : "bg-red-400"}`}
-                      style={{ width: `${Math.round(score * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs font-semibold text-gray-600 w-8 text-right">{Math.round(score * 100)}%</span>
+                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wider">Per-Item Vision Analysis</p>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-indigo-400">gemini-2.5-flash</span>
+                  {!agentResult.multiItemVision.packagingHardGatePassed && (
+                    <span className="bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-semibold">Packaging gate failed</span>
+                  )}
+                  {agentResult.multiItemVision.overallCustomerConfirmation >= 0.5 && (
+                    <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold">Customer confirmation detected</span>
+                  )}
                 </div>
-              ))}
-              <p className="text-xs text-gray-500 pt-1">
-                Identified: <span className="font-medium text-gray-700">{agentResult.vision.damaged_item_name}</span>
-                {agentResult.vision.damaged_item_price > 0 && ` — $${agentResult.vision.damaged_item_price.toFixed(2)}`}
-              </p>
+              </div>
+              <div className="space-y-2">
+                {agentResult.multiItemVision.items.map((item, i) => (
+                  <ItemVerificationRow key={i} item={item} />
+                ))}
+              </div>
+              <div className="flex items-center justify-between pt-1 border-t border-indigo-100">
+                <span className="text-xs text-gray-500">
+                  {agentResult.multiItemVision.items.filter((i) => i.verified).length} of {agentResult.multiItemVision.items.length} item(s) verified
+                </span>
+                <span className="text-sm font-bold text-gray-800">
+                  Total: ${agentResult.multiItemVision.totalVerifiedAmount.toFixed(2)}
+                  <span className="text-xs font-normal text-gray-400 ml-1">(capped at $100)</span>
+                </span>
+              </div>
             </div>
           )}
 

@@ -1,6 +1,11 @@
 import path from "path"
 import fs from "fs"
-import type { Case, Shipment, Attachment, Invoice, GateResult, RulebookResult } from "./types"
+import type {
+  Case, Shipment, Attachment, Invoice, LineItem,
+  GateResult, RulebookResult, TriageResult,
+  ItemVisionResult, MultiItemVisionOutput,
+} from "./types"
+import { logWaitingClaim } from "./supabase"
 
 const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -26,7 +31,7 @@ async function orChat(model: string, messages: object[], jsonMode = false, maxTo
   return data.choices?.[0]?.message?.content ?? ""
 }
 
-// ---------- Types ----------
+// ---------- Public types ----------
 
 export interface VisionOutput {
   damage_visible: number
@@ -55,19 +60,23 @@ export interface JudgeOutput {
 
 export interface AgentAnalysis {
   caseSummary: string
-  vision: VisionOutput | null
+  vision: VisionOutput | null               // best single-item scores, for backward compat
+  multiItemVision: MultiItemVisionOutput | null
   decision: DecisionOutput | null
   judge: JudgeOutput | null
   feedbackApplied: boolean
   updatedRulebook: Partial<RulebookResult>
 }
 
-// ---------- Weights ----------
+// ---------- Constants ----------
 
 const VISION_WEIGHTS = { damage_visible: 0.35, product_identifiable: 0.30, packaging_present: 0.20, claim_coherent: 0.15 }
 const HUMAN_REVIEW_THRESHOLD = 0.70
 const CRITICAL_GAP_THRESHOLD = 0.30
 const CRITICAL_GAP_CAP = 0.50
+const VERIFIED_THRESHOLD = 0.50     // min score to count an item as verified
+const PACKAGING_HARD_GATE = 0.40    // below this → packaging issue flag
+const MAX_REIMBURSEMENT = 100
 
 // ---------- Validation helpers ----------
 
@@ -82,13 +91,13 @@ function validateVision(raw: unknown): VisionOutput | null {
   const required = ["damage_visible", "product_identifiable", "packaging_present", "claim_coherent", "damaged_item_name", "damaged_item_price"]
   if (required.some((k) => !(k in r))) return null
   return {
-    damage_visible:                 clamp(r.damage_visible),
-    product_identifiable:           clamp(r.product_identifiable),
-    packaging_present:              clamp(r.packaging_present),
-    claim_coherent:                 clamp(r.claim_coherent),
-    customer_confirmation_present:  clamp(r.customer_confirmation_present ?? 0),
-    damaged_item_name:              String(r.damaged_item_name ?? "Unknown item"),
-    damaged_item_price:             Math.max(0, parseFloat(String(r.damaged_item_price ?? 0)) || 0),
+    damage_visible:                clamp(r.damage_visible),
+    product_identifiable:          clamp(r.product_identifiable),
+    packaging_present:             clamp(r.packaging_present),
+    claim_coherent:                clamp(r.claim_coherent),
+    customer_confirmation_present: clamp(r.customer_confirmation_present ?? 0),
+    damaged_item_name:             String(r.damaged_item_name ?? "Unknown item"),
+    damaged_item_price:            Math.max(0, parseFloat(String(r.damaged_item_price ?? 0)) || 0),
   }
 }
 
@@ -98,15 +107,8 @@ function validateDecision(raw: unknown, vision: VisionOutput): DecisionOutput | 
   if (!r.recommendation || !r.reasoning || !r.draft_email) return null
 
   let recommendation = r.recommendation as DecisionOutput["recommendation"]
-
-  // Cross-validation: contradiction between low damage score and approve
-  if (recommendation === "approve" && vision.damage_visible < CRITICAL_GAP_THRESHOLD) {
-    recommendation = "request_more_info"
-  }
-  // Cross-validation: contradiction between low identifiability and approve
-  if (recommendation === "approve" && vision.product_identifiable < CRITICAL_GAP_THRESHOLD) {
-    recommendation = "request_more_info"
-  }
+  if (recommendation === "approve" && vision.damage_visible < CRITICAL_GAP_THRESHOLD) recommendation = "request_more_info"
+  if (recommendation === "approve" && vision.product_identifiable < CRITICAL_GAP_THRESHOLD) recommendation = "request_more_info"
 
   return {
     recommendation,
@@ -142,7 +144,7 @@ export async function generateCaseSummary(description: string): Promise<string> 
   ])
 }
 
-// ---------- Step 2: vision analysis (gemini-2.5-flash) ----------
+// ---------- Step 2a: fetch image as base64 ----------
 
 async function fetchAsBase64(url: string): Promise<{ base64: string; mimeType: string } | null> {
   try {
@@ -157,14 +159,159 @@ async function fetchAsBase64(url: string): Promise<{ base64: string; mimeType: s
   }
 }
 
+// ---------- Step 2b: per-item vision ----------
+
+export async function analyzeItem(
+  targetItem: string,
+  attachments: Attachment[],
+  invoice: Invoice,
+  description: string
+): Promise<ItemVisionResult> {
+  const billableItems = invoice.line_items.filter((i) => i.unit_price > 0)
+  const invoiceSummary = billableItems
+    .map((i) => `- ${i.name} (SKU: ${i.sku}) × ${i.quantity} @ $${i.unit_price.toFixed(2)}`)
+    .join("\n")
+
+  const imageData = await Promise.all(attachments.slice(0, 3).map((a) => fetchAsBase64(a.url)))
+  const imageContent = imageData
+    .filter((d): d is NonNullable<typeof d> => d !== null)
+    .map((d) => ({
+      type: "image_url",
+      image_url: { url: `data:${d.mimeType};base64,${d.base64}` },
+    }))
+
+  const fallbackResult: ItemVisionResult = {
+    claimedItemName: targetItem,
+    invoiceMatch: null,
+    verified: false,
+    damage_visible: 0,
+    product_identifiable: 0,
+    packaging_present: 0,
+    claim_coherent: 0,
+    customer_confirmation_present: 0,
+    verifiedAmount: 0,
+  }
+
+  if (imageContent.length === 0) return fallbackResult
+
+  const raw = await orChat(
+    "google/gemini-2.5-flash",
+    [
+      {
+        role: "system",
+        content: `You are a claims evidence analyst. You are examining photos for ONE SPECIFIC claimed item: "${targetItem}"
+
+Search every photo carefully and return a JSON object with exactly these keys for THIS ITEM:
+- damage_visible (0.0–1.0): Is physical damage to "${targetItem}" visible in at least one photo?
+- product_identifiable (0.0–1.0): Can "${targetItem}" be positively identified in any photo?
+- packaging_present (0.0–1.0): Is outer shipping packaging visible in any photo? (shared check, same for all items)
+- claim_coherent (0.0–1.0): Does the merchant description match what is visible for "${targetItem}"?
+- customer_confirmation_present (0.0–1.0): Does any image appear to be a screenshot or message showing end-customer reported damage?
+
+Be conservative. Score high only with clear, unambiguous evidence. Return only valid JSON, no other text.`,
+      },
+      {
+        role: "user",
+        content: [
+          ...imageContent,
+          {
+            type: "text",
+            text: `Merchant description: "${description}"\n\nInvoice items:\n${invoiceSummary}\n\nFocus on: "${targetItem}"`,
+          },
+        ],
+      },
+    ],
+    true,
+    512
+  )
+
+  let scores: Record<string, number> = {}
+  try {
+    const parsed = JSON.parse(raw)
+    scores = {
+      damage_visible:                clamp(parsed.damage_visible),
+      product_identifiable:          clamp(parsed.product_identifiable),
+      packaging_present:             clamp(parsed.packaging_present),
+      claim_coherent:                clamp(parsed.claim_coherent),
+      customer_confirmation_present: clamp(parsed.customer_confirmation_present ?? 0),
+    }
+  } catch {
+    return fallbackResult
+  }
+
+  const invoiceMatch = matchInvoiceItem(targetItem, billableItems)
+  const verified =
+    scores.damage_visible >= VERIFIED_THRESHOLD &&
+    scores.product_identifiable >= VERIFIED_THRESHOLD
+
+  return {
+    claimedItemName: targetItem,
+    invoiceMatch: invoiceMatch
+      ? { name: invoiceMatch.name, sku: invoiceMatch.sku, unit_price: invoiceMatch.unit_price }
+      : null,
+    verified,
+    damage_visible:                scores.damage_visible,
+    product_identifiable:          scores.product_identifiable,
+    packaging_present:             scores.packaging_present,
+    claim_coherent:                scores.claim_coherent,
+    customer_confirmation_present: scores.customer_confirmation_present,
+    verifiedAmount: verified ? (invoiceMatch?.unit_price ?? 0) : 0,
+  }
+}
+
+// ---------- Step 2c: run multi-item analysis concurrently ----------
+
+export async function runMultiItemAnalysis(
+  claimedItems: string[],
+  attachments: Attachment[],
+  invoice: Invoice,
+  description: string,
+  c: Case
+): Promise<MultiItemVisionOutput> {
+  const items = claimedItems.length > 0 ? claimedItems : ["damaged item"]
+
+  const results = await Promise.all(
+    items.map((item) => analyzeItem(item, attachments, invoice, description))
+  )
+
+  const packagingScores = results.map((r) => r.packaging_present)
+  const maxPackaging = Math.max(...packagingScores)
+  const packagingHardGatePassed = maxPackaging >= PACKAGING_HARD_GATE
+
+  const rawTotal = results.reduce((sum, r) => sum + r.verifiedAmount, 0)
+  const totalVerifiedAmount = Math.min(rawTotal, MAX_REIMBURSEMENT)
+
+  const overallCustomerConfirmation = Math.max(...results.map((r) => r.customer_confirmation_present))
+
+  // If nothing verified and packaging gate failed → log waiting claim
+  const anyVerified = results.some((r) => r.verified)
+  if (!anyVerified) {
+    const missingEvidence: string[] = []
+    if (!packagingHardGatePassed) missingEvidence.push("outer packaging photo")
+    if (results.every((r) => r.damage_visible < VERIFIED_THRESHOLD)) missingEvidence.push("clear damage photo")
+    if (results.every((r) => r.product_identifiable < VERIFIED_THRESHOLD)) missingEvidence.push("identifiable product photo")
+
+    await logWaitingClaim({
+      case_id: c.case_id,
+      case_number: c.case_number,
+      account_name: c.account_name,
+      missing_evidence: missingEvidence,
+    })
+  }
+
+  return { items: results, packagingHardGatePassed, totalVerifiedAmount, overallCustomerConfirmation }
+}
+
+// ---------- Legacy single-item analyzeEvidence (kept for compatibility) ----------
+
 export async function analyzeEvidence(
   attachments: Attachment[],
   invoice: Invoice,
   description: string
 ): Promise<VisionOutput | null> {
   if (attachments.length === 0) return null
-
-  const invoiceSummary = invoice.line_items
+  const billableItems = invoice.line_items.filter((i) => i.unit_price > 0)
+  const invoiceSummary = billableItems
     .map((i) => `- ${i.name} (SKU: ${i.sku}) × ${i.quantity} @ $${i.unit_price.toFixed(2)}`)
     .join("\n")
 
@@ -218,24 +365,19 @@ Be conservative — only score high when there is clear, unambiguous evidence. R
 
 // ---------- Invoice cross-reference ----------
 
-import type { LineItem } from "./types"
-
 function matchInvoiceItem(aiName: string, lineItems: LineItem[]): LineItem | null {
-  if (!aiName || aiName === "Unknown item") return null
+  if (!aiName || aiName === "Unknown item" || aiName === "damaged item") return null
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, "")
   const needle = normalize(aiName)
 
-  // 1. Exact match
   const exact = lineItems.find((i) => normalize(i.name) === needle)
   if (exact) return exact
 
-  // 2. One name fully contains the other
   const contains = lineItems.find(
     (i) => normalize(i.name).includes(needle) || needle.includes(normalize(i.name))
   )
   if (contains) return contains
 
-  // 3. Word overlap — at least 2 words in common
   const needleWords = new Set(needle.split(" ").filter((w) => w.length > 2))
   const overlap = lineItems.find((i) => {
     const itemWords = normalize(i.name).split(" ").filter((w) => w.length > 2)
@@ -385,82 +527,95 @@ export async function runAgent(
   shipment: Shipment,
   attachments: Attachment[],
   invoice: Invoice,
-  existingRulebook: RulebookResult
+  existingRulebook: RulebookResult,
+  triage?: TriageResult
 ): Promise<AgentAnalysis> {
-  if (!existingRulebook.eligibility.passed) {
-    return { caseSummary: "", vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
+  const empty: AgentAnalysis = {
+    caseSummary: "", vision: null, multiItemVision: null,
+    decision: null, judge: null, feedbackApplied: false, updatedRulebook: {},
   }
+
+  if (!existingRulebook.eligibility.passed) return empty
 
   const caseSummary = await generateCaseSummary(c.description)
 
-  if (attachments.length === 0) {
-    return { caseSummary, vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
+  if (attachments.length === 0) return { ...empty, caseSummary }
+
+  // Determine claimed items: prefer triage metadata, fallback to description parse
+  const claimedItems = (triage?.claimedItems && triage.claimedItems.length > 0)
+    ? triage.claimedItems
+    : ["damaged item"]
+
+  // Run multi-item vision concurrently across shared photos
+  const multiItemVision = await runMultiItemAnalysis(claimedItems, attachments, invoice, c.description, c)
+
+  // Build a representative single VisionOutput from the best-scoring verified item
+  // (or the item with highest damage score if none verified)
+  const bestItem = multiItemVision.items.reduce((best, cur) =>
+    cur.damage_visible > best.damage_visible ? cur : best,
+    multiItemVision.items[0]
+  )
+
+  const vision: VisionOutput = {
+    damage_visible:                bestItem.damage_visible,
+    product_identifiable:          bestItem.product_identifiable,
+    packaging_present:             bestItem.packaging_present,
+    claim_coherent:                bestItem.claim_coherent,
+    customer_confirmation_present: multiItemVision.overallCustomerConfirmation,
+    damaged_item_name:             bestItem.invoiceMatch?.name ?? bestItem.claimedItemName,
+    damaged_item_price:            bestItem.invoiceMatch?.unit_price ?? 0,
   }
 
-  const vision = await analyzeEvidence(attachments, invoice, c.description)
-  if (!vision) {
-    return { caseSummary, vision: null, decision: null, judge: null, feedbackApplied: false, updatedRulebook: {} }
-  }
-
-  const decisionConfidence = computeDecisionConfidence(vision)
-  const billableItems = invoice.line_items.filter((i) => i.unit_price > 0)
-  const highestValueItem = billableItems.sort((a, b) => b.unit_price - a.unit_price)[0]
-
-  // Cross-reference: verify AI-identified item exists on invoice
-  const matchedItem = matchInvoiceItem(vision.damaged_item_name, billableItems)
-  const invoiceItemVerified = matchedItem !== null
-
-  // Use matched invoice price as source of truth; fall back to highest-value item if unmatched
-  const verifiedItem = matchedItem ?? highestValueItem
-  const recommendedAmount = Math.min(verifiedItem?.unit_price ?? 0, 100)
-
-  // Override vision name/price to reflect what's actually on the invoice
-  if (matchedItem) {
-    vision.damaged_item_name = matchedItem.name
-    vision.damaged_item_price = matchedItem.unit_price
-  }
+  const recommendedAmount = multiItemVision.totalVerifiedAmount
 
   const pastFeedback = loadMerchantFeedback(c.account_name)
   const feedbackContext = buildFeedbackContext(pastFeedback)
   const feedbackApplied = pastFeedback.length > 0
 
   const decision = await makeDecision(c, vision, recommendedAmount, feedbackContext)
-
-  // Judge runs only when we have a decision
   const judge = decision ? await judgeDecision(vision, decision) : null
 
-  // Force human review if judge fails or item couldn't be verified on invoice
+  const decisionConfidence = computeDecisionConfidence(vision)
   const judgeFailed = judge?.verdict === "fail"
-  const itemUnverified = !invoiceItemVerified
+  const noItemsVerified = !multiItemVision.items.some((i) => i.verified)
+  const packagingFailed = !multiItemVision.packagingHardGatePassed
 
   const finalAmount = decision?.recommended_amount ?? recommendedAmount
   const finalConfidence = Math.min(existingRulebook.eligibility.confidence, decisionConfidence)
-  const needsHumanReview = finalConfidence < HUMAN_REVIEW_THRESHOLD || judgeFailed || itemUnverified
+  const needsHumanReview =
+    finalConfidence < HUMAN_REVIEW_THRESHOLD || judgeFailed || noItemsVerified || packagingFailed
 
-  const invoiceNote = invoiceItemVerified
-    ? `Matched to invoice: "${matchedItem!.name}" (SKU: ${matchedItem!.sku}) @ $${matchedItem!.unit_price.toFixed(2)}.`
-    : `AI identified "${vision.damaged_item_name}" but no match found on invoice — falling back to highest-value item "${highestValueItem?.name}". Human review required.`
+  const verifiedItemNames = multiItemVision.items
+    .filter((i) => i.verified)
+    .map((i) => i.invoiceMatch?.name ?? i.claimedItemName)
+
+  const invoiceNote = noItemsVerified
+    ? `No claimed items could be verified in photos — human review required.`
+    : `Verified: ${verifiedItemNames.join(", ")}. Total reimbursement: $${recommendedAmount.toFixed(2)} (capped at $${MAX_REIMBURSEMENT}).`
+
+  const packagingNote = packagingFailed
+    ? " Outer packaging photo not detected — packaging gate failed."
+    : ""
 
   const decisionGate: GateResult = {
-    passed: decision?.recommendation === "approve" && !judgeFailed && invoiceItemVerified,
+    passed: decision?.recommendation === "approve" && !judgeFailed && !noItemsVerified,
     reason: [
-      invoiceNote,
-      judgeFailed
-        ? `Judge flagged: ${judge?.flags.join("; ")}.`
-        : (decision?.reasoning ?? ""),
+      invoiceNote + packagingNote,
+      judgeFailed ? `Judge flagged: ${judge?.flags.join("; ")}.` : (decision?.reasoning ?? ""),
     ].filter(Boolean).join(" "),
-    confidence: invoiceItemVerified ? decisionConfidence : Math.min(decisionConfidence, 0.5),
+    confidence: noItemsVerified ? Math.min(decisionConfidence, 0.5) : decisionConfidence,
   }
 
   const evidenceGate: GateResult = {
     ...existingRulebook.evidence,
-    reason: `${attachments.length} photo(s) analyzed. damage=${vision.damage_visible.toFixed(2)}, identifiable=${vision.product_identifiable.toFixed(2)}, packaging=${vision.packaging_present.toFixed(2)}, coherence=${vision.claim_coherent.toFixed(2)}.`,
+    reason: `${attachments.length} photo(s) analyzed across ${claimedItems.length} claimed item(s). damage=${vision.damage_visible.toFixed(2)}, identifiable=${vision.product_identifiable.toFixed(2)}, packaging=${vision.packaging_present.toFixed(2)}, coherence=${vision.claim_coherent.toFixed(2)}.`,
     confidence: Math.min(vision.damage_visible, vision.product_identifiable) > 0 ? 1 : 0.5,
   }
 
   return {
     caseSummary,
     vision,
+    multiItemVision,
     decision,
     judge,
     feedbackApplied,

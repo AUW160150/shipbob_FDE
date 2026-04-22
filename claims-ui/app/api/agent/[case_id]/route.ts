@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { getCase, getAttachments, getShipment, getInvoice } from "@/lib/sample-data"
 import { runRulebook } from "@/lib/rulebook"
+import { runTriage } from "@/lib/triage"
 import { runAgent } from "@/lib/agent"
 
 export async function POST(
@@ -25,14 +26,19 @@ export async function POST(
   }
 
   try {
-    const baseRulebook = runRulebook(c, shipment, attachments, invoice)
-    const analysis = await runAgent(c, shipment, attachments, invoice, baseRulebook)
+    const [baseRulebook, triage] = await Promise.all([
+      Promise.resolve(runRulebook(c, shipment, attachments, invoice)),
+      runTriage(c, shipment, attachments, invoice),
+    ])
+
+    const analysis = await runAgent(c, shipment, attachments, invoice, baseRulebook, triage)
     const updatedRulebook = { ...baseRulebook, ...analysis.updatedRulebook }
 
     return NextResponse.json({
       case_id,
       caseSummary: analysis.caseSummary,
       vision: analysis.vision,
+      multiItemVision: analysis.multiItemVision,
       decision: analysis.decision,
       judge: analysis.judge,
       feedbackApplied: analysis.feedbackApplied,
