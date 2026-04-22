@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ShipBob Claims UI
 
-## Getting Started
+AI-powered damaged-in-transit claims processing for the ShipBob merchant care team. An agent processes each claim through a deterministic rulebook and a multi-step LLM pipeline, then presents a draft recommendation to a rep for review and approval.
 
-First, run the development server:
+---
+
+## Prerequisites
+
+- Node.js 18+
+- An [OpenRouter](https://openrouter.ai) API key
+
+---
+
+## Setup
 
 ```bash
+# 1. Clone the repo
+git clone https://github.com/AUW160150/shipbob_FDE.git
+cd shipbob_FDE
+
+# 2. Install dependencies
+cd claims-ui
+npm install
+
+# 3. Set your OpenRouter key
+echo "OPENROUTER_API_KEY=sk-or-your-key-here" > .env.local
+
+# 4. Run the dev server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The `sample/` folder at the repo root contains pre-fetched mock API data for 5 test cases — no live API calls needed to load the UI.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## How to demo
 
-To learn more about Next.js, take a look at the following resources:
+1. **Queue tab** — lists all open claims, prioritized by severity (red → orange → yellow)
+2. Click a claim to open the detail panel
+3. Click **Run AI Analysis** — triggers the 4-step agent pipeline (summary → vision → decision → judge)
+4. Review the vision scores, judge evaluation, and draft email
+5. Edit the email if needed, then click **Approve & Send** — calls the mock email and reimbursement APIs
+6. Approved cases move to the **Reviewed tab**
+7. **Dashboard tab** — shows KPIs, weekly volume, carrier breakdown, merchant frequency
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Repo structure
 
-## Deploy on Vercel
+```
+shipbob_FDE/
+├── sample/                  # Pre-fetched mock API data (cases, invoices, shipments, etc.)
+│   └── feedback.json        # Persisted rep corrections — fed back into future agent runs
+├── claims-ui/               # Next.js 16 app
+│   ├── app/
+│   │   ├── page.tsx         # Server component — loads data, runs rulebook
+│   │   └── api/
+│   │       ├── agent/       # POST — runs AI pipeline for a case
+│   │       ├── approve/     # POST — calls mock email + reimbursement APIs
+│   │       └── feedback/    # GET/POST — reads and writes rep correction history
+│   ├── components/          # AppShell, ClaimsQueue, ClaimDetail, Dashboard, ReviewedPanel
+│   └── lib/
+│       ├── types.ts         # Shared TypeScript interfaces
+│       ├── rulebook.ts      # Deterministic gates (eligibility, evidence)
+│       └── agent.ts         # AI pipeline (summary → vision → decision → judge)
+├── ARCHITECTURE.md          # System design, flow diagrams, model choices, tradeoffs
+├── SCORING.md               # Confidence scoring logic and weights
+└── WHERE_IT_BREAKS.md       # Known limitations and failure modes
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Models used
+
+| Step | Model | Via |
+|------|-------|-----|
+| Case summary | `meta-llama/llama-3.1-8b-instruct` | OpenRouter |
+| Vision analysis | `google/gemini-2.5-flash` | OpenRouter |
+| Decision + email | `google/gemini-2.5-flash` | OpenRouter |
+| LLM judge | `meta-llama/llama-3.1-8b-instruct` | OpenRouter |
