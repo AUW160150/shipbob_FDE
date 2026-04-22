@@ -39,6 +39,8 @@ export async function POST(
       caseSummary: analysis.caseSummary,
       vision: analysis.vision,
       multiItemVision: analysis.multiItemVision,
+      accountOutput: analysis.accountOutput,
+      validationOutput: analysis.validationOutput,
       decision: analysis.decision,
       judge: analysis.judge,
       feedbackApplied: analysis.feedbackApplied,

@@ -122,6 +122,33 @@ export interface MultiItemVisionOutput {
   overallCustomerConfirmation: number   // max across items
 }
 
+export interface AccountLineItem {
+  itemName: string
+  sku: string
+  invoicePrice: number
+  approvedAmount: number  // may be prorated if subtotal > $100
+}
+
+export interface AccountOutput {
+  lineItems: AccountLineItem[]
+  subtotal: number       // sum before cap
+  totalAmount: number    // capped at $100
+  prorated: boolean
+  draftEmail: string
+}
+
+export interface ValidationCheck {
+  name: string
+  passed: boolean
+  detail: string
+}
+
+export interface ValidationOutput {
+  checks: ValidationCheck[]
+  flags: string[]
+  verdict: "pass" | "warn" | "fail"
+}
+
 export interface ClaimSummary {
   case: Case
   shipment: Shipment

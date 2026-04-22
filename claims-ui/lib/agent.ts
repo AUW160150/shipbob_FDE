@@ -4,8 +4,11 @@ import type {
   Case, Shipment, Attachment, Invoice, LineItem,
   GateResult, RulebookResult, TriageResult,
   ItemVisionResult, MultiItemVisionOutput,
+  AccountOutput, ValidationOutput,
 } from "./types"
 import { logWaitingClaim } from "./supabase"
+import { runAccountAgent } from "./accountAgent"
+import { runValidationAgent } from "./validationAgent"
 
 const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -62,6 +65,8 @@ export interface AgentAnalysis {
   caseSummary: string
   vision: VisionOutput | null               // best single-item scores, for backward compat
   multiItemVision: MultiItemVisionOutput | null
+  accountOutput: AccountOutput | null
+  validationOutput: ValidationOutput | null
   decision: DecisionOutput | null
   judge: JudgeOutput | null
   feedbackApplied: boolean
@@ -532,6 +537,7 @@ export async function runAgent(
 ): Promise<AgentAnalysis> {
   const empty: AgentAnalysis = {
     caseSummary: "", vision: null, multiItemVision: null,
+    accountOutput: null, validationOutput: null,
     decision: null, judge: null, feedbackApplied: false, updatedRulebook: {},
   }
 
@@ -566,7 +572,11 @@ export async function runAgent(
     damaged_item_price:            bestItem.invoiceMatch?.unit_price ?? 0,
   }
 
-  const recommendedAmount = multiItemVision.totalVerifiedAmount
+  // Account agent: calculate per-item amounts and generate itemized email
+  const accountOutput = await runAccountAgent(multiItemVision.items, c)
+  const recommendedAmount = accountOutput.totalAmount > 0
+    ? accountOutput.totalAmount
+    : multiItemVision.totalVerifiedAmount
 
   const pastFeedback = loadMerchantFeedback(c.account_name)
   const feedbackContext = buildFeedbackContext(pastFeedback)
@@ -574,6 +584,9 @@ export async function runAgent(
 
   const decision = await makeDecision(c, vision, recommendedAmount, feedbackContext)
   const judge = decision ? await judgeDecision(vision, decision) : null
+
+  // Validation agent: verify account math + email consistency
+  const validationOutput = await runValidationAgent(accountOutput, multiItemVision, decision)
 
   const decisionConfidence = computeDecisionConfidence(vision)
   const judgeFailed = judge?.verdict === "fail"
@@ -612,10 +625,15 @@ export async function runAgent(
     confidence: Math.min(vision.damage_visible, vision.product_identifiable) > 0 ? 1 : 0.5,
   }
 
+  // Prefer account agent email over decision agent email (more itemized)
+  const finalDraftEmail = accountOutput.draftEmail || decision?.draft_email || existingRulebook.draftEmail
+
   return {
     caseSummary,
     vision,
     multiItemVision,
+    accountOutput,
+    validationOutput,
     decision,
     judge,
     feedbackApplied,
@@ -625,7 +643,7 @@ export async function runAgent(
       overallConfidence: finalConfidence,
       needsHumanReview,
       recommendedAmount: finalAmount,
-      draftEmail: decision?.draft_email ?? existingRulebook.draftEmail,
+      draftEmail: finalDraftEmail,
       label: needsHumanReview
         ? existingRulebook.label
         : finalAmount >= 75 ? "HIGH_VALUE" : "READY_FOR_REVIEW",

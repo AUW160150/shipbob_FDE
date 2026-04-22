@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef } from "react"
-import type { ClaimSummary, ClaimLabel, GateResult, RulebookResult, ItemVisionResult, MultiItemVisionOutput } from "@/lib/types"
+import type { ClaimSummary, ClaimLabel, GateResult, RulebookResult, ItemVisionResult, MultiItemVisionOutput, AccountOutput, ValidationOutput } from "@/lib/types"
 
 const LABEL_META: Record<ClaimLabel, { text: string; color: string }> = {
   READY_FOR_REVIEW: { text: "Ready for Review", color: "bg-blue-100 text-blue-800" },
@@ -74,6 +74,8 @@ interface AgentResult {
     damaged_item_price: number
   } | null
   multiItemVision: MultiItemVisionOutput | null
+  accountOutput: AccountOutput | null
+  validationOutput: ValidationOutput | null
   decision: {
     recommendation: "approve" | "deny" | "request_more_info"
     confidence: number
@@ -540,6 +542,82 @@ export default function ClaimDetail({
               ) : (
                 <p className="text-xs">No inconsistencies detected — decision is well-supported by evidence.</p>
               )}
+            </div>
+          )}
+
+          {/* Account Agent */}
+          {agentResult?.accountOutput && agentResult.accountOutput.lineItems.length > 0 && (
+            <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wider">Account Agent — Reimbursement Calc</p>
+                {agentResult.accountOutput.prorated && (
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">Prorated to $100 cap</span>
+                )}
+              </div>
+              <table className="w-full">
+                <thead>
+                  <tr className="text-xs text-emerald-600 border-b border-emerald-200">
+                    <th className="text-left pb-1.5 font-medium">Item</th>
+                    <th className="text-right pb-1.5 font-medium">Invoice</th>
+                    <th className="text-right pb-1.5 font-medium">Approved</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {agentResult.accountOutput.lineItems.map((l, i) => (
+                    <tr key={i} className="text-xs border-b border-emerald-100 last:border-0">
+                      <td className="py-1.5 text-gray-700">{l.itemName}<span className="text-gray-400 ml-1">· {l.sku}</span></td>
+                      <td className="py-1.5 text-right text-gray-500">${l.invoicePrice.toFixed(2)}</td>
+                      <td className="py-1.5 text-right font-semibold text-emerald-700">${l.approvedAmount.toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="text-xs font-bold">
+                    <td className="pt-2 text-gray-700">Total</td>
+                    <td className="pt-2 text-right text-gray-400">${agentResult.accountOutput.subtotal.toFixed(2)}</td>
+                    <td className="pt-2 text-right text-emerald-700">${agentResult.accountOutput.totalAmount.toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {/* Validation Agent */}
+          {agentResult?.validationOutput && (
+            <div className={`p-3 rounded-lg border space-y-2 ${
+              agentResult.validationOutput.verdict === "pass"
+                ? "bg-green-50 border-green-200"
+                : agentResult.validationOutput.verdict === "warn"
+                  ? "bg-yellow-50 border-yellow-200"
+                  : "bg-red-50 border-red-200"
+            }`}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-600">Validation Agent</p>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  agentResult.validationOutput.verdict === "pass"
+                    ? "bg-green-100 text-green-700"
+                    : agentResult.validationOutput.verdict === "warn"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-red-100 text-red-700"
+                }`}>
+                  {agentResult.validationOutput.verdict.toUpperCase()}
+                </span>
+              </div>
+              <div className="space-y-1">
+                {agentResult.validationOutput.checks.map((check, i) => (
+                  <div key={i} className="flex items-start gap-2 text-xs">
+                    <span className={`mt-0.5 flex-shrink-0 w-3.5 h-3.5 rounded-full flex items-center justify-center text-white text-[9px] font-bold ${
+                      check.passed ? "bg-green-500" : "bg-red-400"
+                    }`}>
+                      {check.passed ? "✓" : "✗"}
+                    </span>
+                    <div>
+                      <span className="font-medium text-gray-700">{check.name}</span>
+                      <span className="text-gray-400 ml-1">— {check.detail}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
