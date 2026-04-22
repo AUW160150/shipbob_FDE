@@ -3,35 +3,10 @@ import type {
   ValidationCheck, ValidationOutput,
 } from "./types"
 import type { DecisionOutput } from "./agent"
+import { orChat } from "./llm"
 
-const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
 const MAX_REIMBURSEMENT = 100
 const EPSILON = 0.02  // rounding tolerance for proration math
-
-function orHeaders() {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-    "HTTP-Referer": "https://shipbob-claims.local",
-    "X-Title": "ShipBob Claims",
-  }
-}
-
-async function orChat(messages: object[]): Promise<string> {
-  const res = await fetch(OR_BASE, {
-    method: "POST",
-    headers: orHeaders(),
-    body: JSON.stringify({
-      model: "meta-llama/llama-3.1-8b-instruct",
-      messages,
-      max_tokens: 512,
-      response_format: { type: "json_object" },
-    }),
-  })
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`)
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content ?? ""
-}
 
 // ---------- Deterministic checks ----------
 
@@ -121,10 +96,12 @@ async function checkEmailConsistency(account: AccountOutput): Promise<Validation
   }
 
   const itemList = account.lineItems.map((l) => `${l.itemName}: $${l.approvedAmount.toFixed(2)}`).join(", ")
-  const raw = await orChat([
-    {
-      role: "system",
-      content: `You are a QA checker for approval emails. Given an email and the expected items/amounts, check:
+  const raw = await orChat(
+    "meta-llama/llama-3.1-8b-instruct",
+    [
+      {
+        role: "system",
+        content: `You are a QA checker for approval emails. Given an email and the expected items/amounts, check:
 1. Does the email mention all approved items?
 2. Are the amounts in the email correct?
 3. Is the total reimbursement stated correctly?
@@ -132,12 +109,15 @@ async function checkEmailConsistency(account: AccountOutput): Promise<Validation
 Return JSON with keys:
 - passed (boolean)
 - issues (array of strings, empty if passed)`,
-    },
-    {
-      role: "user",
-      content: `Expected items and amounts: ${itemList}\nExpected total: $${account.totalAmount.toFixed(2)}\n\nEmail:\n${account.draftEmail}`,
-    },
-  ])
+      },
+      {
+        role: "user",
+        content: `Expected items and amounts: ${itemList}\nExpected total: $${account.totalAmount.toFixed(2)}\n\nEmail:\n${account.draftEmail}`,
+      },
+    ],
+    true,
+    512
+  )
 
   try {
     const parsed = JSON.parse(raw)

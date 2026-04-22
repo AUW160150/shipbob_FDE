@@ -1,27 +1,7 @@
 import type { Case, ItemVisionResult, AccountLineItem, AccountOutput } from "./types"
+import { orChat } from "./llm"
 
-const OR_BASE = "https://openrouter.ai/api/v1/chat/completions"
 const MAX_REIMBURSEMENT = 100
-
-function orHeaders() {
-  return {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
-    "HTTP-Referer": "https://shipbob-claims.local",
-    "X-Title": "ShipBob Claims",
-  }
-}
-
-async function orChat(messages: object[]): Promise<string> {
-  const res = await fetch(OR_BASE, {
-    method: "POST",
-    headers: orHeaders(),
-    body: JSON.stringify({ model: "google/gemini-2.5-flash", messages, max_tokens: 512 }),
-  })
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`)
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content ?? ""
-}
 
 function buildLineItems(verifiedItems: ItemVisionResult[]): AccountLineItem[] {
   const eligible = verifiedItems.filter((i) => i.verified && i.invoiceMatch && i.invoiceMatch.unit_price > 0)
@@ -73,10 +53,10 @@ The email must:
 - Mention the 5–7 business day processing time
 - Be signed by ShipBob Merchant Care`
 
-  return orChat([
+  return orChat("google/gemini-2.5-flash", [
     { role: "system", content: "You write professional merchant support emails for ShipBob. Return only the email body, no subject line." },
     { role: "user", content: prompt },
-  ])
+  ], false, 512)
 }
 
 export async function runAccountAgent(

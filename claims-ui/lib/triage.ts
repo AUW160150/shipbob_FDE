@@ -1,8 +1,8 @@
 import type { Case, Shipment, Attachment, Invoice, TriageResult, PriorityTag } from "./types"
 import { logDeadClaim, logInsuredClaim, logIncompleteClaim, logAutoEmail } from "./supabase"
+import { orChat } from "./llm"
 
 const MOCK_BASE = "https://e41238c7-aefe-4d20-8866-747c74eac48f.mock.pstmn.io"
-const OR_BASE   = "https://openrouter.ai/api/v1/chat/completions"
 const DEAD_DAYS = 30
 
 function daysBetween(a: string, b: string): number {
@@ -18,41 +18,31 @@ interface ClaimMetadata {
 }
 
 async function extractMetadata(description: string): Promise<ClaimMetadata> {
-  const key = process.env.OPENROUTER_API_KEY
-  if (!key) return { claim_type: "unknown", claimed_items: [], description_adequate: false }
-
+  if (!process.env.OPENROUTER_API_KEY) {
+    return { claim_type: "unknown", claimed_items: [], description_adequate: false }
+  }
   try {
-    const res = await fetch(OR_BASE, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${key}`,
-        "HTTP-Referer": "https://shipbob-claims.local",
-        "X-Title": "ShipBob Claims",
-      },
-      body: JSON.stringify({
-        model: "meta-llama/llama-3.1-8b-instruct",
-        max_tokens: 256,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "system",
-            content: `Analyze a shipping claim description and return JSON with exactly these keys:
+    const raw = await orChat(
+      "meta-llama/llama-3.1-8b-instruct",
+      [
+        {
+          role: "system",
+          content: `Analyze a shipping claim description and return JSON with exactly these keys:
 - claim_type: "product_damage" | "missing_item" | "wrong_item" | "unknown"
 - claimed_items: array of specific product names mentioned (empty array if none)
 - description_adequate: true if description clearly explains what was damaged and how, false if vague or missing
 Return only valid JSON.`,
-          },
-          { role: "user", content: `Claim description: "${description}"` },
-        ],
-      }),
-    })
-    const data = await res.json()
-    const raw = JSON.parse(data.choices?.[0]?.message?.content ?? "{}")
+        },
+        { role: "user", content: `Claim description: "${description}"` },
+      ],
+      true,
+      256
+    )
+    const parsed = JSON.parse(raw)
     return {
-      claim_type:           raw.claim_type ?? "unknown",
-      claimed_items:        Array.isArray(raw.claimed_items) ? raw.claimed_items : [],
-      description_adequate: raw.description_adequate ?? false,
+      claim_type:           parsed.claim_type ?? "unknown",
+      claimed_items:        Array.isArray(parsed.claimed_items) ? parsed.claimed_items : [],
+      description_adequate: parsed.description_adequate ?? false,
     }
   } catch {
     return { claim_type: "unknown", claimed_items: [], description_adequate: false }
